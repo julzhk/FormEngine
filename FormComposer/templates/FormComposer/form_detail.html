@@ -1,0 +1,11 @@
+{% extends "FormComposer/base.html" %}
+
+{% block title %}{{ form.name }}{% endblock %}
+
+{% block content %}
+    <h1 class="text-3xl font-bold text-center mb-8">{{ form.name }}</h1>
+    
+    <div id="form-container">
+        {% include "FormComposer/partials/form_page.html" %}
+    </div>
+{% endblock %}

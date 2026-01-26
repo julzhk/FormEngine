@@ -1,0 +1,10 @@
+{% extends "FormComposer/base.html" %}
+
+{% block title %}Form Completed{% endblock %}
+
+{% block content %}
+    <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4 text-center">
+        <h2 class="text-2xl font-bold mb-4">Thank you!</h2>
+        <p class="text-gray-700">You have successfully completed the form "{{ form.name }}".</p>
+    </div>
+{% endblock %}

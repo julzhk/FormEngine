@@ -1,0 +1,8 @@
+[project]
+name = "formengine"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=6.0.1",
+]
