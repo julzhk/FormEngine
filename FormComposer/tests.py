@@ -89,24 +89,139 @@ class FormComposerViewTest(TestCase):
         self.form.save()
         
         url = reverse('submit_form', args=[self.form.id])
-        data = {'q1': 'test answer'}
+        data = {f'q{self.q1.id}': 'test answer'}
         
         with patch('FormComposer.processor.PetProcessor.process') as mock_process:
             response = self.client.post(url, data)
             self.assertEqual(response.status_code, 200)
             mock_process.assert_called_once()
-            # The first argument to process is request.POST which is a QueryDict
+            # The first argument to process should now be bytes (avro serialized)
             args, kwargs = mock_process.call_args
-            self.assertEqual(args[0]['q1'], 'test answer')
+            self.assertIsInstance(args[0], bytes)
 
 class ProcessorTest(TestCase):
     def test_pet_processor(self):
+        # Create a form for the processor
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(name="Pet Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save()
+
         processor = PetProcessor()
-        data = {'name': 'Fido', 'species': 'Dog'}
-        # This will print to console, which is fine for "logging" as requested
-        processor.process(data)
+        data = {f'q{q1.id}': 'Fido'}
+        serialized_data = form.avro_serialize(data)
+        
+        # This will now use form.avro_deserialize
+        processor.process(serialized_data, form)
+        
         # We just want to ensure it doesn't crash and follows the interface
         self.assertTrue(isinstance(processor, PetProcessor))
+
+    def test_submission_form_avro_deserialize(self):
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(name="Pet Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save()
+
+        data = {f'q{q1.id}': 'Fido'}
+        serialized_data = form.avro_serialize(data)
+        deserialized_data = form.avro_deserialize(serialized_data)
+        
+        self.assertEqual(deserialized_data[f'q{q1.id}'], 'Fido')
+
+    def test_submission_form_avro_deserialize_validation_failure(self):
+        import fastavro
+        import io
+        from fastavro.validation import ValidationError
+        
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(name="Pet Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save()
+        
+        # Create data with a different schema that has a DIFFERENT type for the SAME field name
+        # OR a missing field that is required.
+        # Our schema has fields as ["null", "string"].
+        # Let's try to pass an integer to a field that should be a string.
+        
+        field_name = f'q{q1.id}'
+        wrong_schema = {
+            "type": "record",
+            "name": f"Form{form.id}",
+            "fields": [
+                {"name": field_name, "type": "int"}
+            ]
+        }
+        
+        bytes_io = io.BytesIO()
+        fastavro.writer(bytes_io, fastavro.parse_schema(wrong_schema), [{field_name: 123}])
+        wrong_data = bytes_io.getvalue()
+        
+        with self.assertRaises(ValidationError):
+            form.avro_deserialize(wrong_data)
+
+    def test_pet_processor_avro_serialize(self):
+        import io
+        import fastavro
+        from .models import Question, FormPage, SubmissionForm, FormPageQuestion, SubmissionFormPage
+        
+        # Setup form for dynamic schema
+        q1 = Question.objects.create(label="Name")
+        q2 = Question.objects.create(label="Species")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        FormPageQuestion.objects.create(form_page=page, question=q2, order=2)
+        form = SubmissionForm.objects.create(name="Pet Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+
+        processor = PetProcessor()
+        # Input data matches the expected q<id> format
+        data = {f'q{q1.id}': 'Fido', f'q{q2.id}': 'Dog'}
+        
+        # Explicitly save form to populate cached avro_schema
+        form.save()
+        
+        serialized_data = form.avro_serialize(data)
+        
+        # Verify it can be deserialized
+        bytes_io = io.BytesIO(serialized_data)
+        reader = fastavro.reader(bytes_io)
+        deserialized_records = list(reader)
+        deserialized_data = deserialized_records[0]
+        
+        self.assertEqual(deserialized_data[f'q{q1.id}'], 'Fido')
+        self.assertEqual(deserialized_data[f'q{q2.id}'], 'Dog')
+
+    def test_submission_form_generate_avro_schema(self):
+        q1 = Question.objects.create(label="First Name")
+        q2 = Question.objects.create(label="Last Name")
+        page = FormPage.objects.create(title="Identity")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        FormPageQuestion.objects.create(form_page=page, question=q2, order=2)
+        form = SubmissionForm.objects.create(name="Schema Test Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        
+        # We need to trigger save to populate avro_schema
+        # In the test, we just created it and then added the page.
+        # Adding to the M2M through model (SubmissionFormPage) won't automatically 
+        # trigger save() on the SubmissionForm instance unless we call it.
+        form.save()
+
+        schema = form.avro_schema
+        
+        self.assertEqual(schema['type'], 'record')
+        self.assertEqual(schema['name'], f'Form{form.id}')
+        self.assertEqual(len(schema['fields']), 2)
+        self.assertEqual(schema['fields'][0]['name'], f'q{q1.id}')
+        self.assertEqual(schema['fields'][0]['doc'], 'First Name')
+        self.assertEqual(schema['fields'][1]['name'], f'q{q2.id}')
+        self.assertEqual(schema['fields'][1]['doc'], 'Last Name')
 
     def test_submission_form_processor_choices(self):
         form = SubmissionForm.objects.create(name="Processor Form")

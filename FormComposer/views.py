@@ -50,9 +50,14 @@ def submit_form(request, form_id):
                 module = importlib.import_module(module_path)
                 processor_class = getattr(module, class_name)
                 processor = processor_class()
-                processor.process(request.POST)
+                
+                # Convert POST data to Avro serialized data using the cached schema
+                avro_data = form.avro_serialize(request.POST)
+                
+                # Pass the avro data to the process method
+                processor.process(avro_data,form)
             except (ImportError, AttributeError, ValueError) as e:
-                print(f"Error instantiating processor {form.processor_class}: {e}")
+                print(f"Error instantiating or executing processor {form.processor_class}: {e}")
 
         return HttpResponse('<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative" role="alert"><strong class="font-bold">Success!</strong><span class="block sm:inline"> Thank you for your submission. This is an acknowledgement message.</span></div>')
     return HttpResponse("Method not allowed", status=405)
