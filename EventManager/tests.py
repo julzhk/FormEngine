@@ -1,5 +1,5 @@
 from django.test import TestCase
-from .models import Event, Consumer
+from .models import Event, ConsumerOffset
 
 class EventModelTest(TestCase):
     def test_event_creation(self):
@@ -20,21 +20,20 @@ class EventModelTest(TestCase):
             event.data = b"updated"
             event.save()
 
-class ConsumerModelTest(TestCase):
-    def test_consumer_creation_and_tracking(self):
+class ConsumerOffsetModelTest(TestCase):
+    def test_consumer_offset_creation_and_tracking(self):
         event1 = Event.objects.create(data=b"event 1", metadata={})
         event2 = Event.objects.create(data=b"event 2", metadata={})
         
-        consumer = Consumer.objects.create(name="TestConsumer")
-        self.assertNil(consumer.last_event)
+        # Note: we use a string that would normally be a processor class
+        processor = "FormComposer.processor.PetProcessor"
+        consumer_offset = ConsumerOffset.objects.create(processor_class=processor)
+        self.assertIsNone(consumer_offset.offset)
         
-        consumer.last_event = event1
-        consumer.save()
-        self.assertEqual(consumer.last_event, event1)
+        consumer_offset.offset = event1
+        consumer_offset.save()
+        self.assertEqual(consumer_offset.offset, event1)
         
-        consumer.last_event = event2
-        consumer.save()
-        self.assertEqual(consumer.last_event, event2)
-
-    def assertNil(self, value):
-        self.assertIsNone(value)
+        consumer_offset.offset = event2
+        consumer_offset.save()
+        self.assertEqual(consumer_offset.offset, event2)

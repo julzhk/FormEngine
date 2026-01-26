@@ -3,6 +3,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 from .models import Question, FormPage, SubmissionForm, FormPageQuestion, SubmissionFormPage
 from .processor import PetProcessor
+from EventManager.models import Event, ConsumerOffset
 
 class FormComposerModelTest(TestCase):
     def test_form_creation_with_ordering(self):
@@ -79,11 +80,19 @@ class FormComposerViewTest(TestCase):
             f'q{self.q1.id}': 'Answer 1',
             f'q{self.q2.id}': 'Answer 2',
         }
+        
+        initial_event_count = Event.objects.count()
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "acknowledgement message")
+        self.assertContains(response, "queued for processing")
+        
+        # Verify an event was created
+        self.assertEqual(Event.objects.count(), initial_event_count + 1)
+        event = Event.objects.last()
+        self.assertEqual(event.metadata['form_id'], self.form.id)
 
-    def test_submit_form_with_processor(self):
+    def test_submit_form_with_processor_metadata(self):
         # Set a processor for the form
         self.form.processor_class = 'FormComposer.processor.PetProcessor'
         self.form.save()
@@ -91,16 +100,58 @@ class FormComposerViewTest(TestCase):
         url = reverse('submit_form', args=[self.form.id])
         data = {f'q{self.q1.id}': 'test answer'}
         
-        with patch('FormComposer.processor.PetProcessor.process') as mock_process:
-            response = self.client.post(url, data)
-            self.assertEqual(response.status_code, 200)
-            mock_process.assert_called_once()
-            # The first argument to process should now be bytes (avro serialized)
-            args, kwargs = mock_process.call_args
-            self.assertIsInstance(args[0], bytes)
+        initial_event_count = Event.objects.count()
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify an event was created with correct processor class in metadata
+        self.assertEqual(Event.objects.count(), initial_event_count + 1)
+        event = Event.objects.last()
+        self.assertEqual(event.metadata['processor_class'], 'FormComposer.processor.PetProcessor')
+        
+        # Verify it can be deserialized back
+        deserialized = self.form.avro_deserialize(event.data)
+        self.assertEqual(deserialized[f'q{self.q1.id}'], 'test answer')
+
+from django.core.management import call_command
+
+class FormComposerManagementCommandTest(TestCase):
+    def test_process_events_command(self):
+        # Setup form and events
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(
+            name="Pet Form", 
+            processor_class='FormComposer.processor.PetProcessor'
+        )
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save()
+
+        # Create an event
+        data1 = {f'q{q1.id}': 'Fido'}
+        avro_data1 = form.avro_serialize(data1)
+        
+        Event.objects.create(
+            data=avro_data1,
+            metadata={'form_id': form.id, 'processor_class': form.processor_class}
+        )
+        
+        # Call the management command
+        with patch.object(PetProcessor, 'do_process') as mock_do_process:
+            call_command('process_events')
+            
+            # Check if do_process was called
+            self.assertEqual(mock_do_process.call_count, 1)
+            
+        # Verify offset is updated
+        offset = ConsumerOffset.objects.get(processor_class=form.processor_class)
+        self.assertIsNotNone(offset.offset)
 
 class ProcessorTest(TestCase):
     def test_pet_processor(self):
+        import os
+        import glob
         # Create a form for the processor
         q1 = Question.objects.create(label="Name")
         page = FormPage.objects.create(title="Page")
@@ -113,11 +164,85 @@ class ProcessorTest(TestCase):
         data = {f'q{q1.id}': 'Fido'}
         serialized_data = form.avro_serialize(data)
         
-        # This will now use form.avro_deserialize
+        # This will now use form.avro_deserialize and trigger do_process which writes a file
         processor.process(serialized_data, form)
         
-        # We just want to ensure it doesn't crash and follows the interface
+        # Verify it can be instantiated
         self.assertTrue(isinstance(processor, PetProcessor))
+
+        # Check for created file
+        files = glob.glob("*.txt")
+        self.assertTrue(len(files) > 0)
+        
+        # Clean up
+        found = False
+        for f in files:
+            with open(f, 'r') as file_content:
+                if file_content.read() == 'Fido':
+                    os.remove(f)
+                    found = True
+                    break
+        self.assertTrue(found, "The output file with content 'Fido' was not found.")
+
+    def test_pet_processor_consume(self):
+        # Setup form and events
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(
+            name="Pet Form", 
+            processor_class='FormComposer.processor.PetProcessor'
+        )
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save()
+
+        # Create two events
+        data1 = {f'q{q1.id}': 'Fido'}
+        data2 = {f'q{q1.id}': 'Rex'}
+        
+        avro_data1 = form.avro_serialize(data1)
+        avro_data2 = form.avro_serialize(data2)
+        
+        event1 = Event.objects.create(
+            data=avro_data1,
+            metadata={'form_id': form.id, 'processor_class': form.processor_class}
+        )
+        event2 = Event.objects.create(
+            data=avro_data2,
+            metadata={'form_id': form.id, 'processor_class': form.processor_class}
+        )
+        
+        processor = PetProcessor()
+        
+        # Initially offset should not exist or be null
+        offset = ConsumerOffset.objects.filter(processor_class=form.processor_class).first()
+        self.assertTrue(offset is None or offset.offset is None)
+        
+        # Consume events
+        with patch.object(PetProcessor, 'do_process') as mock_do_process:
+            PetProcessor.consume()
+            
+            # Check if do_process was called for both events
+            self.assertEqual(mock_do_process.call_count, 2)
+            
+        # Check if offset is updated to event2
+        offset = ConsumerOffset.objects.get(processor_class=form.processor_class)
+        self.assertEqual(offset.offset, event2)
+        
+        # Add another event and consume again
+        data3 = {f'q{q1.id}': 'Buddy'}
+        avro_data3 = form.avro_serialize(data3)
+        event3 = Event.objects.create(
+            data=avro_data3,
+            metadata={'form_id': form.id, 'processor_class': form.processor_class}
+        )
+        
+        with patch.object(PetProcessor, 'do_process') as mock_do_process:
+            PetProcessor.consume()
+            self.assertEqual(mock_do_process.call_count, 1)
+            
+        offset.refresh_from_db()
+        self.assertEqual(offset.offset, event3)
 
     def test_submission_form_avro_deserialize(self):
         q1 = Question.objects.create(label="Name")

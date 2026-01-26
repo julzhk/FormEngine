@@ -3,11 +3,20 @@ import fastavro
 import fastavro.validation
 from django.db import models
 
+from FormComposer.processor import Processor
+
+
 def get_processor_choices():
+    subclasses = get_processor_klasses()
+    return [(f"{sub.__module__}.{sub.__name__}", sub.__name__) for sub in subclasses]
+
+
+def get_processor_klasses() -> list[type[Processor]]:
     from .processor import Processor
     # Get all subclasses of Processor
     subclasses = Processor.__subclasses__()
-    return [(f"{sub.__module__}.{sub.__name__}", sub.__name__) for sub in subclasses]
+    return subclasses
+
 
 class Question(models.Model):
     label = models.CharField(max_length=255)

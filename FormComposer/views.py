@@ -2,6 +2,7 @@ import importlib
 from django.shortcuts import render, get_object_or_404
 from django.http import HttpResponse
 from .models import SubmissionForm, SubmissionFormPage
+from EventManager.models import Event
 
 def form_detail(request, form_id):
     form = get_object_or_404(SubmissionForm, pk=form_id)
@@ -42,22 +43,24 @@ def submit_form(request, form_id):
     form = get_object_or_404(SubmissionForm, pk=form_id)
     if request.method == 'POST':
         print(f"Form submission received for form: {form.name} (ID: {form.id})")
-        print(f"POST data: {request.POST}")
         
-        if form.processor_class:
-            try:
-                module_path, class_name = form.processor_class.rsplit('.', 1)
-                module = importlib.import_module(module_path)
-                processor_class = getattr(module, class_name)
-                processor = processor_class()
-                
-                # Convert POST data to Avro serialized data using the cached schema
-                avro_data = form.avro_serialize(request.POST)
-                
-                # Pass the avro data to the process method
-                processor.process(avro_data,form)
-            except (ImportError, AttributeError, ValueError) as e:
-                print(f"Error instantiating or executing processor {form.processor_class}: {e}")
+        try:
+            # Convert POST data to Avro serialized data using the cached schema
+            avro_data = form.avro_serialize(request.POST)
+            
+            # Create an Event 
+            Event.objects.create(
+                data=avro_data,
+                metadata={
+                    'form_id': form.id,
+                    'form_name': form.name,
+                    'processor_class': form.processor_class,
+                }
+            )
+            print(f"Event created for form submission: {form.id}")
+            
+        except Exception as e:
+            print(f"Error creating event for form {form.id}: {e}")
 
-        return HttpResponse('<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative" role="alert"><strong class="font-bold">Success!</strong><span class="block sm:inline"> Thank you for your submission. This is an acknowledgement message.</span></div>')
+        return HttpResponse('<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative" role="alert"><strong class="font-bold">Success!</strong><span class="block sm:inline"> Thank you for your submission. This is an acknowledgement message. Your submission has been queued for processing.</span></div>')
     return HttpResponse("Method not allowed", status=405)

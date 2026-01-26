@@ -1,5 +1,7 @@
 from django.db import models
 
+from FormComposer.models import get_processor_choices
+
 class Event(models.Model):
     data = models.BinaryField()
     metadata = models.JSONField()
@@ -17,10 +19,14 @@ class Event(models.Model):
     def __str__(self):
         return f"Event {self.id} created at {self.created_at}"
 
-class Consumer(models.Model):
-    name = models.CharField(max_length=255, unique=True)
-    last_event = models.ForeignKey(Event, on_delete=models.SET_NULL, null=True, blank=True)
+class ConsumerOffset(models.Model):
+    processor_class = models.CharField(
+        max_length=255,
+        choices=get_processor_choices,
+        unique=True
+    )
+    offset = models.ForeignKey(Event, on_delete=models.SET_NULL, null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Consumer {self.name} at event {self.last_event_id if self.last_event else 'None'}"
+        return f"ConsumerOffset for {self.processor_class} at event {self.offset_id if self.offset else 'None'}"
