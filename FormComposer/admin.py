@@ -19,6 +19,6 @@ class FormPageAdmin(admin.ModelAdmin):
 
 @admin.register(SubmissionForm)
 class SubmissionFormAdmin(admin.ModelAdmin):
-    list_display = ('name', 'processor_class')
+    list_display = ('name', 'processor_class', 'version')
     inlines = [SubmissionFormPageInline]
-    readonly_fields = ('avro_schema',)
+    readonly_fields = ('avro_schema', 'version')

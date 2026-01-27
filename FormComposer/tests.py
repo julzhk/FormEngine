@@ -341,7 +341,8 @@ class ProcessorTest(TestCase):
         schema = form.avro_schema
         
         self.assertEqual(schema['type'], 'record')
-        self.assertEqual(schema['name'], f'Form{form.id}')
+        self.assertEqual(schema['name'], f'Form{form.id}_v{form.version}')
+        self.assertEqual(schema['namespace'], f"{form.name.replace(' ', '_')}.v{form.version}")
         self.assertEqual(len(schema['fields']), 2)
         self.assertEqual(schema['fields'][0]['name'], f'q{q1.id}')
         self.assertEqual(schema['fields'][0]['doc'], 'First Name')
@@ -359,3 +360,112 @@ class ProcessorTest(TestCase):
         # The format we defined is f"{sub.__module__}.{sub.__name__}"
         expected_choice = ('FormComposer.processor.PetProcessor', 'PetProcessor')
         self.assertIn(expected_choice, choices)
+
+    def test_form_page_save_updates_submission_form_schema(self):
+        # Create a form and a page
+        q1 = Question.objects.create(label="Initial Question")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        
+        form = SubmissionForm.objects.create(name="Signal Test Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        
+        # Initial save to populate schema
+        form.save()
+        initial_schema = form.avro_schema
+        self.assertEqual(len(initial_schema['fields']), 1)
+        self.assertEqual(initial_schema['fields'][0]['doc'], "Initial Question")
+        
+        # Update the question's label - wait, Question save doesn't trigger FormPage save.
+        # But the issue says "when a 'FormPage' is saved".
+        # So let's add another question to the page and save the page.
+        q2 = Question.objects.create(label="Second Question")
+        FormPageQuestion.objects.create(form_page=page, question=q2, order=2)
+        
+        # Saving the page should trigger the signal
+        page.save()
+        
+        # Refresh the form from DB
+        form.refresh_from_db()
+        updated_schema = form.avro_schema
+        
+        # The schema should now have 2 fields
+        self.assertEqual(len(updated_schema['fields']), 2)
+        self.assertEqual(updated_schema['fields'][1]['doc'], "Second Question")
+
+    def test_submission_form_version_increment(self):
+        form = SubmissionForm.objects.create(name="Version Test Form")
+        self.assertEqual(form.version, 0)
+        
+        form.save()
+        self.assertEqual(form.version, 1)
+        
+        form.save()
+        self.assertEqual(form.version, 2)
+        
+        # Verify it's persisted
+        form.refresh_from_db()
+        self.assertEqual(form.version, 2)
+
+    def test_submission_form_avro_deserialize_registry(self):
+        from AvroSchemaManager.models import SchemaRegistry
+        q1 = Question.objects.create(label="Name")
+        page = FormPage.objects.create(title="Page")
+        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
+        form = SubmissionForm.objects.create(name="Pet Form")
+        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
+        form.save() # This populates avro_schema AND SchemaRegistry
+
+        data = {f'q{q1.id}': 'Fido'}
+        serialized_data = form.avro_serialize(data)
+        
+        # Manually change the registry entry's schema to prove it's being used
+        registry_name = form.avro_schema['name']
+        registry_entry = SchemaRegistry.objects.get(name=registry_name, version=form.version)
+        modified_schema = registry_entry.avro_schema.copy()
+        # Add a field that isn't in the data
+        modified_schema['fields'].append({
+            "name": "extra_field",
+            "type": "string",
+            "doc": "Required extra field"
+        })
+        registry_entry.avro_schema = modified_schema
+        registry_entry.save()
+        
+        # Deserialization should now fail validation because extra_field is missing in the record but required in the schema
+        from fastavro.validation import ValidationError
+        with self.assertRaises(ValidationError):
+            form.avro_deserialize(serialized_data)
+
+    def test_submission_form_save_to_schema_registry(self):
+        from AvroSchemaManager.models import SchemaRegistry
+        import json
+        
+        form = SubmissionForm.objects.create(name="Registry Test Form")
+        # create saves twice, first time version=0, second time version=0 (update_fields=['avro_schema'])
+        # Wait, let's trace:
+        # 1. create() calls save()
+        # 2. pk is None, version remains 0.
+        # 3. super().save() -> pk is set.
+        # 4. avro_schema = generate...
+        # 5. super().save(update_fields=['avro_schema'])
+        # 6. SchemaRegistry.update_or_create(name=Form{id}, version=0, ...)
+        
+        self.assertEqual(form.version, 0)
+        registry_name = form.avro_schema['name']
+        registry_entry = SchemaRegistry.objects.get(name=registry_name, version=0)
+        self.assertEqual(registry_entry.avro_schema, form.avro_schema)
+        
+        # Update form
+        form.save()
+        # pk exists, version becomes 1
+        # SchemaRegistry.update_or_create(name=Form{id}_v1, version=1, ...)
+        
+        self.assertEqual(form.version, 1)
+        registry_name_v1 = form.avro_schema['name']
+        registry_entry_v1 = SchemaRegistry.objects.get(name=registry_name_v1, version=1)
+        self.assertEqual(registry_entry_v1.avro_schema, form.avro_schema)
+        
+        # Total entries for this form: version 0 and version 1
+        # Using __contains because name includes the version now
+        self.assertEqual(SchemaRegistry.objects.filter(name__startswith=f"Form{form.id}_v").count(), 2)
