@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'FormComposer',
     'EventManager',
     'AvroSchemaManager',
+    'DocuSignIntegration',
 ]
 
 MIDDLEWARE = [
