@@ -70,6 +70,11 @@ classDiagram
         +String processor_class
         +DateTime updated_at
     }
+    class DocuSignFieldMapping {
+        +String name
+        +String template_string
+        +render(data_dict)
+    }
     class SchemaRegistry {
         +String name
         +String namespace
@@ -77,10 +82,12 @@ classDiagram
         +JSON avro_schema
     }
 
+
     SubmissionForm "1" *-- "*" FormPage : contains
     FormPage "1" *-- "*" Question : contains
     ConsumerOffset o-- Event : tracks
     SubmissionForm ..> SchemaRegistry : registers
+    SubmissionForm "1" -- "0..1" DocuSignFieldMapping : mapped by
     Event ..> SchemaRegistry : references (via metadata)
 ```
 
@@ -111,6 +118,18 @@ Ensures data consistency across the lifecycle of an event.
     *   `SchemaRegistry`: Stores historical versions of Avro schemas. Each entry includes `name`, `namespace`, `version`, and the `avro_schema` JSON.
 *   **Key Logic**:
     *   Allows processors to look up the exact schema version used when an event was originally produced, ensuring safe deserialization even if the form definition has since changed.
+
+### 4. DocuSignIntegration
+Provides integration with DocuSign by mapping form data to DocuSign payloads.
+
+*   **Models**:
+    *   `DocuSignFieldMapping`: Defines how form submission data should be transformed into a DocuSign JSON payload. It uses a `template_string` (Django Template) to allow flexible mapping of form fields (e.g., `{{ q1 }}`) to the required DocuSign structure.
+*   **Key Logic**:
+    *   **DocuSignProcessor**: A specialized processor that:
+        1. Identifies the `DocuSignFieldMapping` json template associated with the submitted form.
+        2. Renders the mapping's template using the deserialized form data.
+        3. Parses the resulting JSON string to ensure validity.
+        4. (Future) Sends the payload to the DocuSign API.
 
 ---
 
