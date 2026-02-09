@@ -188,9 +188,9 @@ sequenceDiagram
 *   **Database**: SQLite (default for spike)
 
 ## Future Roadmap (Todo)
-*   Add transactions for consumers to ensure atomic processing and offset updates.
+* Only really supports one consumer rn. it's a POC.  
+* Add transactions for consumers to ensure atomic processing and offset updates.
 *   Implement a dead-letter queue for failed events.
-*   Integrate Django Channels for real-time updates.
 *   Enhance consumer exception handling and retry logic.
 *   Integrate metrics and structured logging.
 *   Evaluate dedicated queue backends (e.g., `pgmq` or `pgqueuer`).

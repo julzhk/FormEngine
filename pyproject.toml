@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
+    "business-rule-engine>=0.2.0",
     "django>=6.0.1",
     "fastavro>=1.12.1",
+    "ipykernel>=7.2.0",
 ]
