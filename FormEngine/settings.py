@@ -37,10 +37,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'guardian', 
     'FormComposer',
     'EventManager',
     'AvroSchemaManager',
     'DocuSignIntegration',
+    'django_json_widget',
 ]
 
 MIDDLEWARE = [

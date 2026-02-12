@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 from FormComposer.processor import Processor
@@ -30,4 +31,10 @@ class DocuSignProcessor(Processor):
             return
 
         logger.info(f"DocuSign payload for form {form.name}: {json.dumps(payload, indent=2)}")
+        # Write out a text file with filename being the current datetime
+        filename = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".txt"
+        with open(filename, "w") as f:
+            f.write(rendered_json)
+        print(f"Wrote data to {filename}")
+
         print(f"DocuSign payload: {json.dumps(payload, indent=2)}")
