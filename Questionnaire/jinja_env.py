@@ -56,33 +56,40 @@ def get_required_fields_environment() -> jinja2.Environment:
 required_fields_env = get_required_fields_environment()
 
 
-def render_page(template_source: str, errors: list[str] | None = None, **context) -> str:
+def render_page(
+    template_source: str,
+    errors: list[str] | None = None,
+    error_messages: dict[str, str] | None = None,
+    **context,
+) -> str:
     """
     Render a page template, highlighting any fields listed in *errors*.
 
-    Fields named in *errors* will have an inline "This field is required."
-    message appended to their HTML via the ``_errors_ctx`` thread-local.
+    *error_messages* maps field names to custom validation messages.
+    Fields without an entry fall back to "This field is required."
     """
     _errors_ctx.fields = set(errors or [])
+    _errors_ctx.messages = error_messages or {}
     try:
         return environment.from_string(template_source).render(**context)
     finally:
         _errors_ctx.fields = set()
+        _errors_ctx.messages = {}
 
 
-def get_required_fields(template_source: str) -> list[str]:
+def get_field_validators(template_source: str) -> dict[str, list[str]]:
     """
-    Return the names of all fields marked ``"required"`` in *template_source*,
-    in document order.
+    Return ``{field_name: [validators]}`` for every field that declares
+    validators in *template_source*.
 
     Handles ``{% question %}``, ``{% multiquestion %}``, and ``{{ text() }}``.
-    All other constructs (``{% when %}``, ``{% context %}``, ``{{ answer() }}``,
-    ``{{ multianswer() }}``, ``{{ show() }}``) are treated as no-op stubs.
     """
-    _req_collector.fields = []
+    _req_collector.fields = {}
     try:
         required_fields_env.from_string(template_source).render()
     finally:
-        result = _req_collector.fields[:]
+        result = dict(_req_collector.fields)
         del _req_collector.fields
     return result
+
+

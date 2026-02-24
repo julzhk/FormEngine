@@ -63,21 +63,17 @@ def _js_str(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _make_badge(required) -> str:
+def _make_badge(validators) -> str:
     """
     Return the HTML badge fragment for a question label.
 
-    ``"required"``  → red asterisk with a screen-reader label.
-    ``"optional"``  → muted ``(optional)`` text.
-    anything else  → empty string (no badge).
+    Shows a red asterisk when ``"required"`` is among the validators.
     """
-    if required == "required":
+    if validators and "required" in validators:
         return (
             '<span class="ml-1 text-red-500" aria-hidden="true">*</span>'
             '<span class="sr-only"> (required)</span>'
         )
-    if required == "optional":
-        return '<span class="ml-2 text-sm font-normal text-gray-400">(optional)</span>'
     return ""
 
 
@@ -106,12 +102,14 @@ def _field_error(name: str, expression: str) -> str:
     fields = getattr(_errors_ctx, "fields", None)
     if not (fields and name in fields):
         return ""
+    messages = getattr(_errors_ctx, "messages", {})
+    message = messages.get(name, "This field is required.")
     return (
         f'<div x-show="{expression}" x-cloak'
         ' x-transition:leave="transition ease-in duration-150"'
         ' x-transition:leave-start="opacity-100"'
         ' x-transition:leave-end="opacity-0">'
-        '<p class="mt-2 text-sm font-medium text-red-600">This field is required.</p>'
+        f'<p class="mt-2 text-sm font-medium text-red-600">{escape(message)}</p>'
         '</div>'
     )
 
@@ -401,8 +399,8 @@ class QuestionExtension(Extension):
     Standalone syntax (creates its own Alpine scope)::
 
         {% question "field_name", "Question text?" %}
-        {% question "field_name", "Question text?", "required" %}
-        {% question "field_name", "Question text?", "optional" %}
+        {% question "field_name", "Question text?", ["required"] %}
+        {% question "field_name", "Question text?", ["required", "is_number"] %}
 
             {{ answer("value_a", "Option A") }}
             {{ answer("value_b", "Option B", "With optional description") }}
@@ -421,19 +419,19 @@ class QuestionExtension(Extension):
         label_node = parser.parse_expression()
         if parser.stream.current.test("comma"):
             next(parser.stream)
-            required_node = parser.parse_expression()
+            validators_node = parser.parse_expression()
         else:
-            required_node = nodes.Const(None)
+            validators_node = nodes.Const(None)
         body = parser.parse_statements(("name:endquestion",), drop_needle=True)
         return nodes.CallBlock(
-            self.call_method("_render", [name_node, label_node, required_node]),
+            self.call_method("_render", [name_node, label_node, validators_node]),
             [], [], body,
         ).set_lineno(lineno)
 
     @staticmethod
-    def _render(name: str, label: str, required, caller) -> str:
+    def _render(name: str, label: str, validators, caller) -> str:
         inner = caller()
-        badge = _make_badge(required)
+        badge = _make_badge(validators)
         js_name = _js_str(name)
         if _in_context():
             return Markup(
@@ -493,23 +491,23 @@ class MultiQuestionExtension(Extension):
         label_node = parser.parse_expression()
         if parser.stream.current.test("comma"):
             next(parser.stream)
-            required_node = parser.parse_expression()
+            validators_node = parser.parse_expression()
         else:
-            required_node = nodes.Const(None)
+            validators_node = nodes.Const(None)
         body = parser.parse_statements(("name:endmultiquestion",), drop_needle=True)
         return nodes.CallBlock(
-            self.call_method("_render", [name_node, label_node, required_node]),
+            self.call_method("_render", [name_node, label_node, validators_node]),
             [], [], body,
         ).set_lineno(lineno)
 
     @staticmethod
-    def _render(name: str, label: str, required, caller) -> str:
+    def _render(name: str, label: str, validators, caller) -> str:
         inner = caller()
         return Markup(
             _MULTI_QUESTION_TMPL % {
                 "name": escape(name),
                 "label": escape(label),
-                "badge": _make_badge(required),
+                "badge": _make_badge(validators),
                 "inner": inner,
                 "error": _field_error(name, "values.length === 0"),
             }
@@ -570,7 +568,7 @@ def multianswer(value: str, label: str, description: str = "") -> Markup:
 def text(
     name: str,
     label: str,
-    required=None,
+    validators=None,
     *,
     placeholder: str = "",
     multiline: bool = False,
@@ -582,8 +580,9 @@ def text(
     Args:
         name:        The form field name submitted in the POST body.
         label:       The visible label for the field.
-        required:    ``"required"`` shows a red ``*``; ``"optional"`` shows a
-                     muted badge; ``None`` (default) shows nothing.
+        validators:  List of validator names, e.g. ``["required"]``,
+                     ``["required", "is_number"]``. ``None`` (default) shows
+                     no badge and applies no validation.
         placeholder: Optional placeholder text for the input.
         multiline:   If ``True``, renders a ``<textarea>`` instead of an
                      ``<input type="text">``.
@@ -592,9 +591,9 @@ def text(
 
     Examples::
 
-        {{ text("full_name", "Full name", "required") }}
-        {{ text("bio", "Short bio", "optional", multiline=true, rows=6) }}
-        {{ text("notes", "Extra notes", placeholder="Anything else?") }}
+        {{ text("full_name", "Full name", ["required"]) }}
+        {{ text("age", "Age", ["required", "is_number"]) }}
+        {{ text("bio", "Short bio", multiline=true, rows=6) }}
     """
     ph = f'placeholder="{escape(placeholder)}"' if placeholder else ""
     tmpl = _TEXT_AREA_TMPL if multiline else _TEXT_INPUT_TMPL
@@ -602,7 +601,7 @@ def text(
         tmpl % {
             "name": escape(name),
             "label": escape(label),
-            "badge": _make_badge(required),
+            "badge": _make_badge(validators),
             "placeholder": ph,
             "rows": int(rows),
             "error": _field_error(name, "!value"),
@@ -617,29 +616,29 @@ def text(
 _req_collector = threading.local()
 
 
-def _collect_if_required(name: str, required) -> None:
-    """Append *name* to the active bucket when required == 'required'."""
+def _collect_field_validators(name: str, validators) -> None:
+    """Store validators list for *name* in the active bucket."""
     bucket = getattr(_req_collector, "fields", None)
-    if required == "required" and bucket is not None:
-        bucket.append(name)
+    if validators and bucket is not None:
+        bucket[name] = list(validators)
 
 
 class _CollectQuestionExtension(QuestionExtension):
-    """Collects required field names; emits no HTML."""
+    """Collects field validators; emits no HTML."""
 
     @staticmethod
-    def _render(name: str, label: str, required, caller) -> str:
-        _collect_if_required(name, required)
+    def _render(name: str, label: str, validators, caller) -> str:
+        _collect_field_validators(name, validators)
         caller()
         return Markup("")
 
 
 class _CollectMultiQuestionExtension(MultiQuestionExtension):
-    """Collects required field names; emits no HTML."""
+    """Collects field validators; emits no HTML."""
 
     @staticmethod
-    def _render(name: str, label: str, required, caller) -> str:
-        _collect_if_required(name, required)
+    def _render(name: str, label: str, validators, caller) -> str:
+        _collect_field_validators(name, validators)
         caller()
         return Markup("")
 
@@ -669,14 +668,14 @@ class _PassthroughWhenExtension(WhenExtension):
 def _collecting_text(
     name: str,
     label: str,
-    required=None,
+    validators=None,
     *,
     placeholder: str = "",
     multiline: bool = False,
     rows: int = 4,
 ) -> Markup:
-    """Stub text() that only records required fields, emits no HTML."""
-    _collect_if_required(name, required)
+    """Stub text() that only records field validators, emits no HTML."""
+    _collect_field_validators(name, validators)
     return Markup("")
 
 
