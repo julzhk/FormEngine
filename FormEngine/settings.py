@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'AvroSchemaManager',
     'DocuSignIntegration',
     'django_json_widget',
+    'Questionnaire',
 ]
 
 MIDDLEWARE = [

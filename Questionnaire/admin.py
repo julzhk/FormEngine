@@ -1,0 +1,23 @@
+from django.contrib import admin
+
+from .models import Page, Questionnaire
+
+
+class PageInline(admin.StackedInline):
+    model = Page
+    extra = 1
+    ordering = ['order']
+    fields = ('title', 'order', 'content')
+
+
+@admin.register(Questionnaire)
+class QuestionnaireAdmin(admin.ModelAdmin):
+    list_display = ('name', 'created_at', 'updated_at')
+    inlines = [PageInline]
+
+
+@admin.register(Page)
+class PageAdmin(admin.ModelAdmin):
+    list_display = ('title', 'questionnaire', 'order')
+    list_filter = ('questionnaire',)
+    ordering = ('questionnaire', 'order')
