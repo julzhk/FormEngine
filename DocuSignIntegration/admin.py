@@ -6,7 +6,7 @@ from .models import DocuSignFieldMapping
 
 @admin.register(DocuSignFieldMapping)
 class DocuSignFieldMappingAdmin(admin.ModelAdmin):
-    list_display = ('name', 'submission_form')
+    list_display = ('name', )
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }

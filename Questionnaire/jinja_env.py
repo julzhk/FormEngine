@@ -10,6 +10,7 @@ from Questionnaire.templatetags.questionnaire_tags import (
     _PassthroughContextExtension,
     _PassthroughWhenExtension,
     _collecting_text,
+    _errors_ctx,
     _req_collector,
     answer,
     multianswer,
@@ -53,6 +54,20 @@ def get_required_fields_environment() -> jinja2.Environment:
 
 
 required_fields_env = get_required_fields_environment()
+
+
+def render_page(template_source: str, errors: list[str] | None = None, **context) -> str:
+    """
+    Render a page template, highlighting any fields listed in *errors*.
+
+    Fields named in *errors* will have an inline "This field is required."
+    message appended to their HTML via the ``_errors_ctx`` thread-local.
+    """
+    _errors_ctx.fields = set(errors or [])
+    try:
+        return environment.from_string(template_source).render(**context)
+    finally:
+        _errors_ctx.fields = set()
 
 
 def get_required_fields(template_source: str) -> list[str]:

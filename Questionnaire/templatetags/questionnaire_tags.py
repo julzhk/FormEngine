@@ -86,9 +86,34 @@ def _make_badge(required) -> str:
 # each request thread has its own local state.
 _render_ctx = threading.local()
 
+# Thread-local set of field names that failed required validation.
+# Populated by render_page() in jinja_env.py before each render.
+_errors_ctx = threading.local()
 
 def _in_context() -> bool:
     return getattr(_render_ctx, "active", False)
+
+
+def _field_error(name: str, expression: str) -> str:
+    """
+    Return a reactive error div if *name* is in the current error set.
+
+    *expression* is the Alpine.js boolean expression that is truthy when the
+    field is empty (e.g. ``"!value"``, ``"values.length === 0"``).  The div
+    uses ``x-show`` so it disappears the moment the user fills the field, with
+    a short fade-out transition.
+    """
+    fields = getattr(_errors_ctx, "fields", None)
+    if not (fields and name in fields):
+        return ""
+    return (
+        f'<div x-show="{expression}" x-cloak'
+        ' x-transition:leave="transition ease-in duration-150"'
+        ' x-transition:leave-start="opacity-100"'
+        ' x-transition:leave-end="opacity-0">'
+        '<p class="mt-2 text-sm font-medium text-red-600">This field is required.</p>'
+        '</div>'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +135,9 @@ _CONTEXT_TMPL = """\
 # hidden input is a sibling (not a child) of x-radio. This prevents
 # @alpinejs/ui from treating the hidden input as a radio child element.
 _QUESTION_TMPL = """\
-<div class="mb-10">
+<div class="mb-10" x-data="{ value: $persist('').as('%(name)s') }">
   <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
-  <div x-data="{ value: $persist('').as('%(name)s') }" class="w-full max-w-xl">
+  <div class="w-full max-w-xl">
     <input type="hidden" name="%(name)s" :value="value">
     <div x-radio x-model="value">
       <label x-radio:label class="sr-only">%(label)s</label>
@@ -121,6 +146,7 @@ _QUESTION_TMPL = """\
       </div>
     </div>
   </div>
+  %(error)s
 </div>"""
 
 # Context-mode: no x-data — binds x-radio directly into the shared parent
@@ -139,6 +165,7 @@ _QUESTION_CTX_TMPL = """\
       </div>
     </div>
   </div>
+  %(error)s
 </div>"""
 
 _ANSWER_TMPL = """\
@@ -165,9 +192,9 @@ _ANSWER_DESC_TMPL = (
 # --- Multiple-choice (checkbox via plain Alpine.js) -------------------------
 
 _MULTI_QUESTION_TMPL = """\
-<div class="mb-10">
+<div class="mb-10" x-data="{ values: $persist([]).as('%(name)s') }">
   <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
-  <div x-data="{ values: $persist([]).as('%(name)s') }" class="w-full max-w-xl">
+  <div class="w-full max-w-xl">
     <template x-for="v in values" :key="v">
       <input type="hidden" name="%(name)s" :value="v">
     </template>
@@ -175,6 +202,7 @@ _MULTI_QUESTION_TMPL = """\
 %(inner)s
     </div>
   </div>
+  %(error)s
 </div>"""
 
 # %(js_value)s  — JS-escaped, used inside Alpine expressions
@@ -211,6 +239,7 @@ _TEXT_INPUT_TMPL = """\
   <input type="text" id="%(name)s" name="%(name)s" x-model="value"
     class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors"
     %(placeholder)s>
+  %(error)s
 </div>"""
 
 _TEXT_AREA_TMPL = """\
@@ -219,6 +248,7 @@ _TEXT_AREA_TMPL = """\
   <textarea id="%(name)s" name="%(name)s" rows="%(rows)s" x-model="value"
     class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors resize-y"
     %(placeholder)s></textarea>
+  %(error)s
 </div>"""
 
 
@@ -404,14 +434,16 @@ class QuestionExtension(Extension):
     def _render(name: str, label: str, required, caller) -> str:
         inner = caller()
         badge = _make_badge(required)
+        js_name = _js_str(name)
         if _in_context():
             return Markup(
                 _QUESTION_CTX_TMPL % {
-                    "js_name": _js_str(name),
+                    "js_name": js_name,
                     "name": escape(name),
                     "label": escape(label),
                     "badge": badge,
                     "inner": inner,
+                    "error": _field_error(name, f"!{js_name}"),
                 }
             )
         return Markup(
@@ -420,6 +452,7 @@ class QuestionExtension(Extension):
                 "label": escape(label),
                 "badge": badge,
                 "inner": inner,
+                "error": _field_error(name, "!value"),
             }
         )
 
@@ -478,6 +511,7 @@ class MultiQuestionExtension(Extension):
                 "label": escape(label),
                 "badge": _make_badge(required),
                 "inner": inner,
+                "error": _field_error(name, "values.length === 0"),
             }
         )
 
@@ -571,6 +605,7 @@ def text(
             "badge": _make_badge(required),
             "placeholder": ph,
             "rows": int(rows),
+            "error": _field_error(name, "!value"),
         }
     )
 

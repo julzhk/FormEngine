@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .jinja_env import environment, get_required_fields
+from .jinja_env import get_required_fields, render_page
 from .models import Page, Questionnaire
 
 
@@ -21,12 +21,16 @@ def questionnaire_page(request, questionnaire_id, page_order):
             )
             if next_page:
                 return redirect('questionnaire:page', questionnaire_id=questionnaire_id, page_order=next_page.order)
+            else:
+                return redirect('questionnaire:complete', questionnaire_id=questionnaire_id)
+            
 
-    rendered_content = environment.from_string(page.content).render(
+    rendered_content = render_page(
+        page.content,
+        errors=errors,
         questionnaire=questionnaire,
         page=page,
-        errors=errors,
-        data=request.POST
+        data=request.POST,
     )
 
     return render(request, 'questionnaire/page.html', {
@@ -36,3 +40,11 @@ def questionnaire_page(request, questionnaire_id, page_order):
         'errors': errors,
         'data': request.POST, 
     })
+
+
+def questionnaire_complete(request, questionnaire_id):
+    questionnaire = get_object_or_404(Questionnaire, pk=questionnaire_id)
+    return render(request, 'questionnaire/complete.html', {
+        'questionnaire': questionnaire,
+    })
+

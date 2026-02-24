@@ -1,11 +1,12 @@
 from django.db import models
-from FormComposer.models import SubmissionForm
+from Questionnaire.models import Questionnaire
 
 
 class DocuSignFieldMapping(models.Model):
-    submission_form = models.ForeignKey(
-        SubmissionForm, on_delete=models.CASCADE,
-        related_name='docusign_mappings'
+
+    questionnaire = models.ForeignKey(
+        Questionnaire, on_delete=models.CASCADE, related_name='docusign_mappings',
+        null=True, blank=True
     )
     name = models.CharField(max_length=255)
     template_string = models.JSONField(
@@ -25,4 +26,4 @@ class DocuSignFieldMapping(models.Model):
         return rendered_data
 
     def __str__(self):
-        return f"{self.name} ({self.submission_form})"
+        return self.name
