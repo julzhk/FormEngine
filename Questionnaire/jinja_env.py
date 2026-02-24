@@ -60,21 +60,25 @@ def render_page(
     template_source: str,
     errors: list[str] | None = None,
     error_messages: dict[str, str] | None = None,
+    validators_failed: dict[str, str] | None = None,
     **context,
 ) -> str:
     """
     Render a page template, highlighting any fields listed in *errors*.
 
     *error_messages* maps field names to custom validation messages.
-    Fields without an entry fall back to "This field is required."
+    *validators_failed* maps field names to the validator name that failed,
+    used to select the correct Alpine.js x-show expression.
     """
     _errors_ctx.fields = set(errors or [])
     _errors_ctx.messages = error_messages or {}
+    _errors_ctx.validators_failed = validators_failed or {}
     try:
         return environment.from_string(template_source).render(**context)
     finally:
         _errors_ctx.fields = set()
         _errors_ctx.messages = {}
+        _errors_ctx.validators_failed = {}
 
 
 def get_field_validators(template_source: str) -> dict[str, list[str]]:

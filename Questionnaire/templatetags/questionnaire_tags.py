@@ -86,11 +86,22 @@ _render_ctx = threading.local()
 # Populated by render_page() in jinja_env.py before each render.
 _errors_ctx = threading.local()
 
+# Maps validator name → Alpine.js x-show expression that is truthy while
+# the field value still fails that validator. Used to keep the error visible
+# until the user actually fixes the value, rather than hiding it the moment
+# the field is non-empty. "required" is omitted here because its expression
+# is field-type-specific (passed in by each tag's _render method).
+
+# these are FE validators - the names are duplicated in the jinja env too.
+_VALIDATOR_ALPINE_EXPR: dict[str, str] = {
+    "is_number": "value !== '' && isNaN(Number(value))",
+}
+
 def _in_context() -> bool:
     return getattr(_render_ctx, "active", False)
 
 
-def _field_error(name: str, expression: str) -> str:
+def  _field_error(name: str, expression: str) -> str:
     """
     Return a reactive error div if *name* is in the current error set.
 
@@ -104,6 +115,9 @@ def _field_error(name: str, expression: str) -> str:
         return ""
     messages = getattr(_errors_ctx, "messages", {})
     message = messages.get(name, "This field is required.")
+    failed_validator = getattr(_errors_ctx, "validators_failed", {}).get(name)
+    if failed_validator and failed_validator in _VALIDATOR_ALPINE_EXPR:
+        expression = _VALIDATOR_ALPINE_EXPR[failed_validator]
     return (
         f'<div x-show="{expression}" x-cloak'
         ' x-transition:leave="transition ease-in duration-150"'
