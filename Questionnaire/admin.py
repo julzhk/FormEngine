@@ -13,6 +13,7 @@ class PageInline(admin.StackedInline):
 @admin.register(Questionnaire)
 class QuestionnaireAdmin(admin.ModelAdmin):
     list_display = ('name', 'created_at', 'updated_at')
+    fields = ('name', 'description', 'completed_content')
     inlines = [PageInline]
 
 

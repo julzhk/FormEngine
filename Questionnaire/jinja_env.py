@@ -56,6 +56,23 @@ def get_required_fields_environment() -> jinja2.Environment:
 required_fields_env = get_required_fields_environment()
 
 
+def get_completed_content_environment() -> jinja2.Environment:
+    env = jinja2.Environment(
+        autoescape=True,
+        undefined=jinja2.Undefined,
+    )
+    env.globals["show"] = show
+    return env
+
+
+completed_content_environment = get_completed_content_environment()
+
+
+def render_completed_content(template_source: str, **context) -> str:
+    """Render a questionnaire's completed_content Jinja2 template."""
+    return completed_content_environment.from_string(template_source).render(**context)
+
+
 def render_page(
     template_source: str,
     errors: list[str] | None = None,

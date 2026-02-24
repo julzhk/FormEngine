@@ -4,6 +4,13 @@ from django.db import models
 class Questionnaire(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    completed_content = models.TextField(
+        blank=True,
+        help_text=(
+            'Jinja2 template shown on the completion page. '
+            'The questionnaire object is available as a context variable.'
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

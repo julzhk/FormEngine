@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from EventManager.models import Event
-from .jinja_env import get_field_validators, render_page
+from .jinja_env import get_field_validators, render_completed_content, render_page
 from .models import Page, Questionnaire, QuestionnaireSubmission
 
 
@@ -77,8 +77,14 @@ def questionnaire_page(request, questionnaire_id, page_order):
 
 def questionnaire_complete(request, questionnaire_id):
     questionnaire = get_object_or_404(Questionnaire, pk=questionnaire_id)
+    rendered_completed_content = (
+        render_completed_content(questionnaire.completed_content, questionnaire=questionnaire,)
+        if questionnaire.completed_content
+        else ""
+    )
     return render(request, 'questionnaire/complete.html', {
         'questionnaire': questionnaire,
+        'rendered_completed_content': rendered_completed_content,
     })
 
 
