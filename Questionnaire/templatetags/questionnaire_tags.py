@@ -575,6 +575,76 @@ def text(
     )
 
 
+# ---------------------------------------------------------------------------
+# Required-fields collection — used by required_fields_env in jinja_env.py
+# ---------------------------------------------------------------------------
+
+_req_collector = threading.local()
+
+
+def _collect_if_required(name: str, required) -> None:
+    """Append *name* to the active bucket when required == 'required'."""
+    bucket = getattr(_req_collector, "fields", None)
+    if required == "required" and bucket is not None:
+        bucket.append(name)
+
+
+class _CollectQuestionExtension(QuestionExtension):
+    """Collects required field names; emits no HTML."""
+
+    @staticmethod
+    def _render(name: str, label: str, required, caller) -> str:
+        _collect_if_required(name, required)
+        caller()
+        return Markup("")
+
+
+class _CollectMultiQuestionExtension(MultiQuestionExtension):
+    """Collects required field names; emits no HTML."""
+
+    @staticmethod
+    def _render(name: str, label: str, required, caller) -> str:
+        _collect_if_required(name, required)
+        caller()
+        return Markup("")
+
+
+class _PassthroughContextExtension(ContextExtension):
+    """Processes the context body without building Alpine HTML."""
+
+    @staticmethod
+    def _render(fields: list[str], caller) -> str:
+        _render_ctx.active = True
+        try:
+            caller()
+        finally:
+            _render_ctx.active = False
+        return Markup("")
+
+
+class _PassthroughWhenExtension(WhenExtension):
+    """Processes the when body without wrapping in x-show."""
+
+    @staticmethod
+    def _render(var: str, value: str, caller) -> str:
+        caller()
+        return Markup("")
+
+
+def _collecting_text(
+    name: str,
+    label: str,
+    required=None,
+    *,
+    placeholder: str = "",
+    multiline: bool = False,
+    rows: int = 4,
+) -> Markup:
+    """Stub text() that only records required fields, emits no HTML."""
+    _collect_if_required(name, required)
+    return Markup("")
+
+
 def show(var_name: str) -> Markup:
     """
     Render a ``<span>`` that displays an Alpine.js variable reactively.
