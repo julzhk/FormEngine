@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>{{ page.title }} — {{ questionnaire.name }}</title>
+    <!-- Alpine Plugins -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js"></script>
+
     <script defer src="https://unpkg.com/@alpinejs/ui@3.15.8/dist/cdn.min.js"></script>
     <script defer src="https://unpkg.com/@alpinejs/focus@3.15.8/dist/cdn.min.js"></script>
     <script defer src="https://unpkg.com/alpinejs@3.15.8/dist/cdn.min.js"></script>
@@ -15,10 +18,22 @@
 <body >
 <h1>{{ questionnaire.name }}</h1>
 <h2>{{ page.title }}</h2>
-
+daa {{data }}
 <form method="post">
 
     {% csrf_token %}
+
+    {% if errors %}
+    <div class="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
+        <p class="text-sm font-semibold text-red-700 mb-1">Please answer all required fields before continuing.</p>
+        <ul class="list-disc list-inside text-sm text-red-600">
+            {% for field in errors %}
+            <li>{{ field }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     {{ rendered_content|safe }}
     <button type="submit">Next</button>
 </form>

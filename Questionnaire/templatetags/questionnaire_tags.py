@@ -112,7 +112,7 @@ _CONTEXT_TMPL = """\
 _QUESTION_TMPL = """\
 <div class="mb-10">
   <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
-  <div x-data="{ value: '' }" class="w-full max-w-xl">
+  <div x-data="{ value: $persist('').as('%(name)s') }" class="w-full max-w-xl">
     <input type="hidden" name="%(name)s" :value="value">
     <div x-radio x-model="value">
       <label x-radio:label class="sr-only">%(label)s</label>
@@ -167,7 +167,7 @@ _ANSWER_DESC_TMPL = (
 _MULTI_QUESTION_TMPL = """\
 <div class="mb-10">
   <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
-  <div x-data="{ values: [] }" class="w-full max-w-xl">
+  <div x-data="{ values: $persist([]).as('%(name)s') }" class="w-full max-w-xl">
     <template x-for="v in values" :key="v">
       <input type="hidden" name="%(name)s" :value="v">
     </template>
@@ -206,17 +206,17 @@ _MULTI_ANSWER_DESC_TMPL = (
 # --- Free-text input --------------------------------------------------------
 
 _TEXT_INPUT_TMPL = """\
-<div class="mb-10">
+<div class="mb-10" x-data="{ value: $persist('').as('%(name)s') }">
   <label for="%(name)s" class="block text-base font-semibold text-gray-900 mb-2">%(label)s%(badge)s</label>
-  <input type="text" id="%(name)s" name="%(name)s"
+  <input type="text" id="%(name)s" name="%(name)s" x-model="value"
     class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors"
     %(placeholder)s>
 </div>"""
 
 _TEXT_AREA_TMPL = """\
-<div class="mb-10">
+<div class="mb-10" x-data="{ value: $persist('').as('%(name)s') }">
   <label for="%(name)s" class="block text-base font-semibold text-gray-900 mb-2">%(label)s%(badge)s</label>
-  <textarea id="%(name)s" name="%(name)s" rows="%(rows)s"
+  <textarea id="%(name)s" name="%(name)s" rows="%(rows)s" x-model="value"
     class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors resize-y"
     %(placeholder)s></textarea>
 </div>"""
@@ -352,10 +352,10 @@ class ContextExtension(Extension):
         finally:
             _render_ctx.active = False
 
-        # Build Alpine x-data init string: field_a: '', field_b: ''
+        # Build Alpine x-data init string with $persist so values survive page reloads.
         # Keys must be unquoted identifiers — double quotes inside an HTML
         # attribute delimited by double quotes would truncate the attribute value.
-        fields_init = ", ".join(f"{f}: ''" for f in fields)
+        fields_init = ", ".join(f"{f}: $persist('').as('{_js_str(f)}')" for f in fields)
         return Markup(
             _CONTEXT_TMPL % {
                 "fields_init": fields_init,
