@@ -10,20 +10,18 @@ class DocuSignFieldMapping(models.Model):
     )
     name = models.CharField(max_length=255)
     template_string = models.JSONField(
-        help_text="JSON object where values can be Django Templates. "
-                  "Form field values are available as template variables (e.g. {{ q1 }}, {{ q2 }})."
+        help_text="JSON object where values are Jinja2 templates. "
+                  "Form field values are available as variables (e.g. {{ q1 }}, {{ q2 }}). "
+                  "Available filters: format_tin (e.g. {{ ssn | format_tin }})."
     )
 
     def render(self, data_dict: dict) -> str:
         """Render the JSON template with form data as context, returning a JSON string."""
         import json
-        from django.template import Template, Context
+        from DocuSignIntegration.jinja_env import environment
 
-        def render_value(value):
-            return Template("{% autoescape off %}" + json.dumps(value) + "{% endautoescape %}").render(Context(data_dict))
-
-        rendered_data = render_value(self.template_string)
-        return rendered_data
+        template_source = json.dumps(self.template_string)
+        return environment.from_string(template_source).render(**data_dict)
 
     def __str__(self):
         return self.name
