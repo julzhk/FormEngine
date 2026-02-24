@@ -15,11 +15,32 @@
         [x-cloak] { display: none !important; }
     </style>
 </head>
-<body >
+<script>
+    document.addEventListener('alpine:init', () => {
+        const formDataKey = 'formData' + {{ questionnaire.id }};
+        const storageKey = 'q_{{ questionnaire.id }}_formData';
+
+        Alpine.store(formDataKey, JSON.parse(localStorage.getItem(storageKey) || '{}'));
+
+        Alpine.data('questionnairePage', () => ({
+            save(event) {
+                const fd = new FormData(event.target);
+                const data = {};
+                for (const key of fd.keys()) {
+                    const vals = fd.getAll(key);
+                    data[key] = vals.length === 1 ? vals[0] : vals;
+                }
+                Object.assign(Alpine.store(formDataKey), data);
+                localStorage.setItem(storageKey, JSON.stringify(Alpine.store(formDataKey)));
+            }
+        }));
+    });
+</script>
+<body x-data="questionnairePage">
 <h1>{{ questionnaire.name }}</h1>
 <h2>{{ page.title }}</h2>
 daa {{data }}
-<form method="post">
+<form method="post" @submit="save">
 
     {% csrf_token %}
 

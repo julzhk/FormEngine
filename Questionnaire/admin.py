@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Page, Questionnaire
+from .models import Page, Questionnaire, QuestionnaireSubmission
 
 
 class PageInline(admin.StackedInline):
@@ -21,3 +21,10 @@ class PageAdmin(admin.ModelAdmin):
     list_display = ('title', 'questionnaire', 'order')
     list_filter = ('questionnaire',)
     ordering = ('questionnaire', 'order')
+
+
+@admin.register(QuestionnaireSubmission)
+class QuestionnaireSubmissionAdmin(admin.ModelAdmin):
+    list_display = ('questionnaire', 'submitted_at')
+    list_filter = ('questionnaire',)
+    readonly_fields = ('questionnaire', 'responses', 'submitted_at')

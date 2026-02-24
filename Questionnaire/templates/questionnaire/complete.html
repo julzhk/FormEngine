@@ -5,6 +5,20 @@
     <title>Form Complete — {{ questionnaire.name }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
+<script>
+    const storageKey = 'q_{{ questionnaire.id }}_formData';
+    const formData = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    fetch('{% url "questionnaire:submit" questionnaire.id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(formData),
+    }).finally(() => {
+        localStorage.removeItem(storageKey);
+    });
+</script>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-lg shadow-md max-w-md w-full text-center">
         <h1 class="text-2xl font-bold text-green-600 mb-4">Thank You!</h1>

@@ -3,7 +3,7 @@ from django.db import models
 from FormComposer.models import get_processor_choices
 
 class Event(models.Model):
-    data = models.BinaryField()
+    data = models.JSONField()
     metadata = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -1,7 +1,12 @@
-from django.shortcuts import get_object_or_404, redirect, render
+import json
 
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
+
+from EventManager.models import Event
 from .jinja_env import get_required_fields, render_page
-from .models import Page, Questionnaire
+from .models import Page, Questionnaire, QuestionnaireSubmission
 
 
 def questionnaire_page(request, questionnaire_id, page_order):
@@ -47,4 +52,27 @@ def questionnaire_complete(request, questionnaire_id):
     return render(request, 'questionnaire/complete.html', {
         'questionnaire': questionnaire,
     })
+
+
+@require_POST
+def questionnaire_submit(request, questionnaire_id):
+    questionnaire = get_object_or_404(Questionnaire, pk=questionnaire_id)
+    try:
+        responses = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    submission = QuestionnaireSubmission.objects.create(
+        questionnaire=questionnaire,
+        responses=responses,
+    )
+    Event.objects.create(
+        data=responses,
+        metadata={
+            'source': 'questionnaire',
+            'questionnaire_id': questionnaire.pk,
+            'questionnaire_name': questionnaire.name,
+            'submission_id': submission.pk,
+        },
+    )
+    return JsonResponse({'id': submission.pk})
 

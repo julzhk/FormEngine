@@ -11,6 +11,17 @@ class Questionnaire(models.Model):
         return self.name
 
 
+class QuestionnaireSubmission(models.Model):
+    questionnaire = models.ForeignKey(
+        'Questionnaire', on_delete=models.CASCADE, related_name='submissions'
+    )
+    responses = models.JSONField()
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.questionnaire.name} — {self.submitted_at:%Y-%m-%d %H:%M}"
+
+
 class Page(models.Model):
     questionnaire = models.ForeignKey(
         Questionnaire, on_delete=models.CASCADE, related_name='pages'
