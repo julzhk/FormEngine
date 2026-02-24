@@ -63,6 +63,24 @@ def _js_str(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
+def _make_badge(required) -> str:
+    """
+    Return the HTML badge fragment for a question label.
+
+    ``"required"``  → red asterisk with a screen-reader label.
+    ``"optional"``  → muted ``(optional)`` text.
+    anything else  → empty string (no badge).
+    """
+    if required == "required":
+        return (
+            '<span class="ml-1 text-red-500" aria-hidden="true">*</span>'
+            '<span class="sr-only"> (required)</span>'
+        )
+    if required == "optional":
+        return '<span class="ml-2 text-sm font-normal text-gray-400">(optional)</span>'
+    return ""
+
+
 # Thread-local flag: True while rendering inside a {% context %} block.
 # Jinja2 renders synchronously, so this is safe for multi-threaded Django —
 # each request thread has its own local state.
@@ -93,7 +111,7 @@ _CONTEXT_TMPL = """\
 # @alpinejs/ui from treating the hidden input as a radio child element.
 _QUESTION_TMPL = """\
 <div class="mb-10">
-  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s</p>
+  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
   <div x-data="{ value: '' }" class="w-full max-w-xl">
     <input type="hidden" name="%(name)s" :value="value">
     <div x-radio x-model="value">
@@ -111,7 +129,7 @@ _QUESTION_TMPL = """\
 # %(js_name)s is the raw JS identifier (field name); %(name)s is HTML-escaped.
 _QUESTION_CTX_TMPL = """\
 <div class="mb-10">
-  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s</p>
+  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
   <div class="w-full max-w-xl">
     <input type="hidden" name="%(name)s" :value="%(js_name)s">
     <div x-radio x-model="%(js_name)s">
@@ -148,7 +166,7 @@ _ANSWER_DESC_TMPL = (
 
 _MULTI_QUESTION_TMPL = """\
 <div class="mb-10">
-  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s</p>
+  <p class="text-base font-semibold text-gray-900 mb-4">%(label)s%(badge)s</p>
   <div x-data="{ values: [] }" class="w-full max-w-xl">
     <template x-for="v in values" :key="v">
       <input type="hidden" name="%(name)s" :value="v">
@@ -184,6 +202,24 @@ _MULTI_ANSWER_TMPL = """\
 _MULTI_ANSWER_DESC_TMPL = (
     '<span class="mt-1 text-sm text-gray-500">%(desc)s</span>'
 )
+
+# --- Free-text input --------------------------------------------------------
+
+_TEXT_INPUT_TMPL = """\
+<div class="mb-10">
+  <label for="%(name)s" class="block text-base font-semibold text-gray-900 mb-2">%(label)s%(badge)s</label>
+  <input type="text" id="%(name)s" name="%(name)s"
+    class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors"
+    %(placeholder)s>
+</div>"""
+
+_TEXT_AREA_TMPL = """\
+<div class="mb-10">
+  <label for="%(name)s" class="block text-base font-semibold text-gray-900 mb-2">%(label)s%(badge)s</label>
+  <textarea id="%(name)s" name="%(name)s" rows="%(rows)s"
+    class="w-full max-w-xl rounded-lg border border-gray-200 px-4 py-3 text-gray-800 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 transition-colors resize-y"
+    %(placeholder)s></textarea>
+</div>"""
 
 
 # --- Conditional visibility -------------------------------------------------
@@ -329,6 +365,9 @@ class QuestionExtension(Extension):
     Standalone syntax (creates its own Alpine scope)::
 
         {% question "field_name", "Question text?" %}
+        {% question "field_name", "Question text?", "required" %}
+        {% question "field_name", "Question text?", "optional" %}
+
             {{ answer("value_a", "Option A") }}
             {{ answer("value_b", "Option B", "With optional description") }}
         {% endquestion %}
@@ -344,21 +383,28 @@ class QuestionExtension(Extension):
         name_node = parser.parse_expression()
         parser.stream.expect("comma")
         label_node = parser.parse_expression()
+        if parser.stream.current.test("comma"):
+            next(parser.stream)
+            required_node = parser.parse_expression()
+        else:
+            required_node = nodes.Const(None)
         body = parser.parse_statements(("name:endquestion",), drop_needle=True)
         return nodes.CallBlock(
-            self.call_method("_render", [name_node, label_node]),
+            self.call_method("_render", [name_node, label_node, required_node]),
             [], [], body,
         ).set_lineno(lineno)
 
     @staticmethod
-    def _render(name: str, label: str, caller) -> str:
+    def _render(name: str, label: str, required, caller) -> str:
         inner = caller()
+        badge = _make_badge(required)
         if _in_context():
             return Markup(
                 _QUESTION_CTX_TMPL % {
                     "js_name": _js_str(name),
                     "name": escape(name),
                     "label": escape(label),
+                    "badge": badge,
                     "inner": inner,
                 }
             )
@@ -366,6 +412,7 @@ class QuestionExtension(Extension):
             _QUESTION_TMPL % {
                 "name": escape(name),
                 "label": escape(label),
+                "badge": badge,
                 "inner": inner,
             }
         )
@@ -405,19 +452,25 @@ class MultiQuestionExtension(Extension):
         name_node = parser.parse_expression()
         parser.stream.expect("comma")
         label_node = parser.parse_expression()
+        if parser.stream.current.test("comma"):
+            next(parser.stream)
+            required_node = parser.parse_expression()
+        else:
+            required_node = nodes.Const(None)
         body = parser.parse_statements(("name:endmultiquestion",), drop_needle=True)
         return nodes.CallBlock(
-            self.call_method("_render", [name_node, label_node]),
+            self.call_method("_render", [name_node, label_node, required_node]),
             [], [], body,
         ).set_lineno(lineno)
 
     @staticmethod
-    def _render(name: str, label: str, caller) -> str:
+    def _render(name: str, label: str, required, caller) -> str:
         inner = caller()
         return Markup(
             _MULTI_QUESTION_TMPL % {
                 "name": escape(name),
                 "label": escape(label),
+                "badge": _make_badge(required),
                 "inner": inner,
             }
         )
@@ -470,6 +523,48 @@ def multianswer(value: str, label: str, description: str = "") -> Markup:
             "html_value": escape(value),
             "label": escape(label),
             "desc": desc_html,
+        }
+    )
+
+
+def text(
+    name: str,
+    label: str,
+    required=None,
+    *,
+    placeholder: str = "",
+    multiline: bool = False,
+    rows: int = 4,
+) -> Markup:
+    """
+    Render a styled free-text input field.
+
+    Args:
+        name:        The form field name submitted in the POST body.
+        label:       The visible label for the field.
+        required:    ``"required"`` shows a red ``*``; ``"optional"`` shows a
+                     muted badge; ``None`` (default) shows nothing.
+        placeholder: Optional placeholder text for the input.
+        multiline:   If ``True``, renders a ``<textarea>`` instead of an
+                     ``<input type="text">``.
+        rows:        Number of visible rows for a ``multiline`` textarea
+                     (default ``4``).
+
+    Examples::
+
+        {{ text("full_name", "Full name", "required") }}
+        {{ text("bio", "Short bio", "optional", multiline=true, rows=6) }}
+        {{ text("notes", "Extra notes", placeholder="Anything else?") }}
+    """
+    ph = f'placeholder="{escape(placeholder)}"' if placeholder else ""
+    tmpl = _TEXT_AREA_TMPL if multiline else _TEXT_INPUT_TMPL
+    return Markup(
+        tmpl % {
+            "name": escape(name),
+            "label": escape(label),
+            "badge": _make_badge(required),
+            "placeholder": ph,
+            "rows": int(rows),
         }
     )
 

@@ -8,6 +8,7 @@ from Questionnaire.templatetags.questionnaire_tags import (
     answer,
     multianswer,
     show,
+    text,
 )
 
 
@@ -20,6 +21,7 @@ def get_environment() -> jinja2.Environment:
     env.globals["answer"] = answer
     env.globals["multianswer"] = multianswer
     env.globals["show"] = show
+    env.globals["text"] = text
     return env
 
 
