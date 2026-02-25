@@ -1,6 +1,8 @@
 from unittest.mock import patch
 from django.test import TestCase, Client
 from django.urls import reverse
+
+from DocuSignIntegration.processor import DocuSignProcessor
 from .models import Question, FormPage, SubmissionForm, FormPageQuestion, SubmissionFormPage
 from .processor import PetProcessor
 from EventManager.models import Event, ConsumerOffset
@@ -108,10 +110,7 @@ class FormComposerViewTest(TestCase):
         self.assertEqual(Event.objects.count(), initial_event_count + 1)
         event = Event.objects.last()
         self.assertEqual(event.metadata['processor_class'], 'FormComposer.processor.PetProcessor')
-        
-        # Verify it can be deserialized back
-        deserialized = self.form.avro_deserialize(event.data)
-        self.assertEqual(deserialized[f'q{self.q1.id}'], 'test answer')
+        self.assertEqual(event.data[f'q{self.q1.id}'], 'test answer')
 
 from django.core.management import call_command
 
@@ -130,17 +129,15 @@ class FormComposerManagementCommandTest(TestCase):
 
         # Create an event
         data1 = {f'q{q1.id}': 'Fido'}
-        avro_data1 = form.avro_serialize(data1)
-        
         Event.objects.create(
-            data=avro_data1,
+            data=data1,
             metadata={'form_id': form.id, 'processor_class': form.processor_class}
         )
         
         # Call the management command
-        with patch.object(PetProcessor, 'do_process') as mock_do_process:
-            call_command('process_events')
-            
+        with patch.object(DocuSignProcessor, 'do_process') as mock_do_process:
+            DocuSignProcessor.consume()
+
             # Check if do_process was called
             self.assertEqual(mock_do_process.call_count, 1)
             
@@ -152,29 +149,20 @@ class ProcessorTest(TestCase):
     def test_pet_processor(self):
         import os
         import glob
-        # Create a form for the processor
-        q1 = Question.objects.create(label="Name")
-        page = FormPage.objects.create(title="Page")
-        FormPageQuestion.objects.create(form_page=page, question=q1, order=1)
-        form = SubmissionForm.objects.create(name="Pet Form")
-        SubmissionFormPage.objects.create(submission_form=form, form_page=page, order=1)
-        form.save()
 
         processor = PetProcessor()
-        data = {f'q{q1.id}': 'Fido'}
-        serialized_data = form.avro_serialize(data)
-        
-        # This will now use form.avro_deserialize and trigger do_process which writes a file
-        processor.process(serialized_data, form)
-        
-        # Verify it can be instantiated
+        data = {'name': 'Fido'}
+        event = Event.objects.create(
+            data=data,
+            metadata={'processor_class': 'FormComposer.processor.PetProcessor'}
+        )
+
+        processor.process(event)
+
         self.assertTrue(isinstance(processor, PetProcessor))
 
-        # Check for created file
+        # Check for created file with content 'Fido'
         files = glob.glob("*.txt")
-        self.assertTrue(len(files) > 0)
-        
-        # Clean up
         found = False
         for f in files:
             with open(f, 'r') as file_content:
@@ -199,16 +187,13 @@ class ProcessorTest(TestCase):
         # Create two events
         data1 = {f'q{q1.id}': 'Fido'}
         data2 = {f'q{q1.id}': 'Rex'}
-        
-        avro_data1 = form.avro_serialize(data1)
-        avro_data2 = form.avro_serialize(data2)
-        
+
         event1 = Event.objects.create(
-            data=avro_data1,
+            data=data1,
             metadata={'form_id': form.id, 'processor_class': form.processor_class}
         )
         event2 = Event.objects.create(
-            data=avro_data2,
+            data=data2,
             metadata={'form_id': form.id, 'processor_class': form.processor_class}
         )
         
@@ -231,9 +216,8 @@ class ProcessorTest(TestCase):
         
         # Add another event and consume again
         data3 = {f'q{q1.id}': 'Buddy'}
-        avro_data3 = form.avro_serialize(data3)
         event3 = Event.objects.create(
-            data=avro_data3,
+            data=data3,
             metadata={'form_id': form.id, 'processor_class': form.processor_class}
         )
         
@@ -254,8 +238,8 @@ class ProcessorTest(TestCase):
 
         data = {f'q{q1.id}': 'Fido'}
         serialized_data = form.avro_serialize(data)
-        deserialized_data = form.avro_deserialize(serialized_data)
-        
+        deserialized_data, _ = form.avro_deserialize(serialized_data)
+
         self.assertEqual(deserialized_data[f'q{q1.id}'], 'Fido')
 
     def test_submission_form_avro_deserialize_validation_failure(self):

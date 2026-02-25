@@ -1,5 +1,11 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from EventManager.models import Event
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +52,11 @@ class Processor(ABC):
 
     def process(self, event):
         logger.info(f"Processing event {event.id}: {event.data}")
-        return self.do_process(event.data, event.metadata)
+        return self.do_process(event)
 
     @abstractmethod
-    def do_process(self, data_dict: dict, metadata: dict):
-        pass
+    def do_process(self, event: Event) -> str:
+        raise NotImplementedError
 
 # class PetProcessor(Processor):
 #     @dataclasses.dataclass

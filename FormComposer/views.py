@@ -45,12 +45,8 @@ def submit_form(request, form_id):
         print(f"Form submission received for form: {form.name} (ID: {form.id})")
         
         try:
-            # Convert POST data to Avro serialized data using the cached schema
-            avro_data = form.avro_serialize(request.POST)
-            
-            # Create an Event 
             Event.objects.create(
-                data=avro_data,
+                data=request.POST.dict(),
                 metadata={
                     'form_id': form.id,
                     'form_name': form.name,
