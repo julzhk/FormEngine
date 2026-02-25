@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
-from DocuSignIntegration.processor import DocuSignProcessor
-from FormComposer.models import get_processor_klasses
+from DocuSignIntegration.processor import DocuSignProcessor, get_processor_klasses
+
 
 class Command(BaseCommand):
     help = 'Iterates through all processor classes and calls their consume method'
@@ -10,7 +10,7 @@ class Command(BaseCommand):
         # todo processor_klasses = get_processor_klasses()
         processor_klasses = [DocuSignProcessor]
         self.stdout.write(f"Found {len(processor_klasses)} processor(s).")
-        
+
         for klass in processor_klasses:
             self.stdout.write(f"Running consumer for {klass.__name__}...")
             try:

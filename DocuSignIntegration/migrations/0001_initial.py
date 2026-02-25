@@ -9,7 +9,6 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('FormComposer', '0004_submissionform_version'),
     ]
 
     operations = [

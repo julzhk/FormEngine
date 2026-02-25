@@ -1,6 +1,6 @@
 from django.db import models
 
-from FormComposer.models import get_processor_choices
+from DocuSignIntegration.processor import get_processor_choices
 
 class Event(models.Model):
     data = models.JSONField()

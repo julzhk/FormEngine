@@ -1,11 +1,8 @@
 import json
 from django.test import TestCase
-from FormComposer.models import SubmissionForm
 from .models import DocuSignFieldMapping
 
 class DocuSignFieldMappingTest(TestCase):
-    def setUp(self):
-        self.form = SubmissionForm.objects.create(name="Test Form")
 
     def test_render_json_template(self):
         mapping = DocuSignFieldMapping.objects.create(
