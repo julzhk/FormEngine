@@ -4,41 +4,39 @@ How to capture a typed form submission as an immutable event but also allow evol
 
 ---
 
-This project is a spike experiment for a dynamic form engine using event sourcing and Avro serialization. It allows for dynamic form creation, schema-driven serialization, and asynchronous event processing.
+This project is a spike experiment for a dynamic form engine using event sourcing. It allows for dynamic questionnaire creation, JSON-based event capture, and asynchronous event processing.
 
 ## Architecture (C4 Model Style)
 
 ### Level 1: System Context
-The FormEngine system allows Users to fill out dynamic forms. Submissions are captured as events, which are then processed by various Processors for downstream tasks (e.g., logging, file generation).
+The FormEngine system allows Users to fill out dynamic questionnaires. Submissions are captured as events, which are then processed by various Processors for downstream tasks (e.g., logging, integration with third-party services like DocuSign).
 
 ```mermaid
 graph TD
-    User((User)) -->|Fills out Form| FormEngine[FormEngine System]
+    User((User)) -->|Fills out Questionnaire| FormEngine[FormEngine System]
     FormEngine -->|Writes Data to| Output[(Output Files/Logs)]
-    Admin((Admin)) -->|Defines Forms| FormEngine
+    Admin((Admin)) -->|Defines Questionnaires| FormEngine
 ```
 
 ### Level 2: Containers
-The system is built as a Django 'modulith' containing three primary Django Apps:
+The system is built as a Django 'modulith' containing several primary Django Apps:
 
 ```mermaid
 graph LR
     subgraph FormEngine Monolith
-        FC[FormComposer]
+        Q[Questionnaire]
         EM[EventManager]
-        ASM[AvroSchemaManager]
+        DI[DocuSignIntegration]
     end
 
-    User --> FC
-    FC -->|Creates Events| EM
-    FC -->|Registers/Gets Schemas| ASM
-    EM -->|Reads Events| FC
-    ASM -.->|Schema Reference| EM
+    User --> Q
+    Q -->|Creates Events| EM
+    EM -->|Processed by| DI
 ```
 
-1.  **FormComposer**: The user-facing application for defining and rendering forms.
-2.  **EventManager**: The event store that records all form submissions as immutable events.
-3.  **AvroSchemaManager**: A central registry for Avro schemas generated from form definitions.
+1.  **Questionnaire**: The user-facing application for defining and rendering multi-page forms.
+2.  **EventManager**: The event store that records all submissions as immutable events.
+3.  **DocuSignIntegration**: A processor that maps event data to DocuSign payloads.
 
 ---
 
@@ -46,23 +44,22 @@ graph LR
 
 ```mermaid
 classDiagram
-    class SubmissionForm {
+    class Questionnaire {
         +String name
-        +JSON avro_schema
-        +Integer version
-        +generate_avro_schema()
-        +avro_serialize()
-        +avro_deserialize()
+        +String description
+        +String completed_content
     }
-    class FormPage {
+    class Page {
         +String title
+        +Integer order
+        +String content
     }
-    class Question {
-        +String label
-        +String field_type
+    class QuestionnaireSubmission {
+        +JSON responses
+        +DateTime submitted_at
     }
     class Event {
-        +Binary data
+        +JSON data
         +JSON metadata
         +DateTime created_at
     }
@@ -72,64 +69,41 @@ classDiagram
     }
     class DocuSignFieldMapping {
         +String name
-        +String template_string
+        +JSON template_string
         +render(data_dict)
     }
-    class SchemaRegistry {
-        +String name
-        +String namespace
-        +Integer version
-        +JSON avro_schema
-    }
 
-
-    SubmissionForm "1" *-- "*" FormPage : contains
-    FormPage "1" *-- "*" Question : contains
+    Questionnaire "1" *-- "*" Page : contains
+    Questionnaire "1" -- "*" QuestionnaireSubmission : has
     ConsumerOffset o-- Event : tracks
-    SubmissionForm ..> SchemaRegistry : registers
-    SubmissionForm "1" -- "0..1" DocuSignFieldMapping : mapped by
-    Event ..> SchemaRegistry : references (via metadata)
+    Questionnaire "1" -- "0..1" DocuSignFieldMapping : mapped by
 ```
 
-### 1. FormComposer
-Responsible for the structure of forms and the logic to serialize submissions.
+### 1. Questionnaire
+Responsible for the structure of questionnaires and rendering them using Jinja2 templates.
 
 *   **Models**:
-    *   `Question`: Individual form fields (currently supports text).
-    *   `FormPage`: A collection of Questions.
-    *   `SubmissionForm`: The top-level form entity. Links to `FormPage`s.
-    *   `SubmissionFormPage` / `FormPageQuestion`: Junction tables for ordering.
+    *   `Questionnaire`: The top-level entity.
+    *   `Page`: Individual pages of a questionnaire, containing Jinja2 template content.
+    *   `QuestionnaireSubmission`: Records the raw JSON response of a submission.
 *   **Key Logic**:
-    *   Automatically generates an **Avro Schema** when a `SubmissionForm` or its pages are saved.
-    *   Caches the current schema version on the form.
-    *   Handles serialization of POST data into Avro bytes.
+    *   Multi-page navigation and validation.
+    *   Custom validators (e.g., `required`, `is_number`) defined in `views.py`.
 
 ### 2. EventManager
 The backbone of the event-driven architecture.
 
 *   **Models**:
-    *   `Event`: An immutable record of a form submission. Stores data as `BinaryField` (Avro bytes) and `metadata` as JSON (e.g., `form_id`, `processor_class`).
-    *   `ConsumerOffset`: Tracks the last processed `Event` for each specific `Processor` class to ensure reliable, ordered consumption.
+    *   `Event`: An immutable record of a submission. Stores data and metadata as `JSONField`.
+    *   `ConsumerOffset`: Tracks the last processed `Event` for each specific `Processor` class.
 
-### 3. AvroSchemaManager
-Ensures data consistency across the lifecycle of an event.
-
-*   **Models**:
-    *   `SchemaRegistry`: Stores historical versions of Avro schemas. Each entry includes `name`, `namespace`, `version`, and the `avro_schema` JSON.
-*   **Key Logic**:
-    *   Allows processors to look up the exact schema version used when an event was originally produced, ensuring safe deserialization even if the form definition has since changed.
-
-### 4. DocuSignIntegration
+### 3. DocuSignIntegration
 Provides integration with DocuSign by mapping form data to DocuSign payloads.
 
 *   **Models**:
-    *   `DocuSignFieldMapping`: Defines how form submission data should be transformed into a DocuSign JSON payload. It uses a `template_string` (Django Template) to allow flexible mapping of form fields (e.g., `{{ q1 }}`) to the required DocuSign structure.
+    *   `DocuSignFieldMapping`: Defines how submission data should be transformed into a DocuSign JSON payload using Jinja2 templates.
 *   **Key Logic**:
-    *   **DocuSignProcessor**: A specialized processor that:
-        1. Identifies the `DocuSignFieldMapping` json template associated with the submitted form.
-        2. Renders the mapping's template using the deserialized form data.
-        3. Parses the resulting JSON string to ensure validity.
-        4. (Future) Sends the payload to the DocuSign API.
+    *   **DocuSignProcessor**: A specialized processor that renders the mapping's template using the event data and writes the result to a file (simulating an API call).
 
 ---
 
@@ -138,44 +112,37 @@ Provides integration with DocuSign by mapping form data to DocuSign payloads.
 ```mermaid
 sequenceDiagram
     participant Admin
-    participant ASM as AvroSchemaManager
     participant User
-    participant FC as FormComposer
+    participant Q as Questionnaire
     participant EM as EventManager
     participant Proc as Processor (Management Command)
 
-    Note over Admin, ASM: 1. Form Definition
-    Admin->>FC: Create/Update Form
-    FC->>ASM: Register New Schema Version
+    Note over Admin, Q: 1. Questionnaire Definition
+    Admin->>Q: Create/Update Questionnaire & Pages
     
     Note over User, EM: 2. Submission
-    User->>FC: Submit Form Data
-    FC->>FC: Get Current Schema
-    FC->>FC: Serialize Data to Avro
-    FC->>EM: Create Event (Binary Data + Metadata)
+    User->>Q: Submit Page Data
+    Q->>Q: Validate Data
+    Note over Q, EM: On Last Page Submit
+    Q->>EM: Create Event (JSON Data + Metadata)
     
-    Note over Proc, ASM: 3. Processing
+    Note over Proc, EM: 3. Processing
     Proc->>EM: Fetch New Events
     loop For Each Event
-        Proc->>ASM: Fetch Schema (by Version in Metadata)
-        Proc->>Proc: Deserialize Binary Data
         Proc->>Proc: Execute do_process()
         Proc->>EM: Update ConsumerOffset
     end
 ```
 
-1.  **Form Definition**: An admin creates a `SubmissionForm` in the Django Admin. On save, a new Avro schema is generated and stored in the `SchemaRegistry`.
-2.  **Submission**: A user submits a form. The `submit_form` view:
-    *   Retrieves the current schema for the form.
-    *   Serializes the POST data into Avro binary format.
-    *   Creates an `Event` record containing the binary data and metadata.
+1.  **Questionnaire Definition**: An admin creates a `Questionnaire` and its `Page`s in the Django Admin.
+2.  **Submission**: A user fills out the questionnaire. On the final page submission:
+    *   Data is validated.
+    *   A `QuestionnaireSubmission` is created.
+    *   An `Event` is created in the `EventManager` with the submission data.
 3.  **Processing**: The `process_events` management command is executed:
-    *   It identifies all active `Processor` subclasses (e.g., `PetProcessor`).
-    *   Each processor checks its `ConsumerOffset` to find new events.
-    *   For each new event:
-        *   The processor retrieves the original schema from `SchemaRegistry`.
-        *   The binary data is deserialized back into a dictionary.
-        *   `do_process()` is called (e.g., `PetProcessor` writes the data to a timestamped text file).
+    *   It identifies all active `Processor` subclasses.
+    *   Each processor checks its `ConsumerOffset` for new events.
+    *   For each new event, `do_process()` is called (e.g., `DocuSignProcessor` generates a JSON payload).
     *   The `ConsumerOffset` is updated.
 
 ---
@@ -183,14 +150,13 @@ sequenceDiagram
 ## Technical Stack
 *   **Language**: Python 3.13
 *   **Framework**: Django
-*   **Serialization**: Avro (via `fastavro`)
-*   **Frontend**: HTMX (for multi-page form navigation)
+*   **Frontend**: HTMX (for multi-page form navigation), Jinja2 (for dynamic content)
 *   **Database**: SQLite (default for spike)
 
 ## Future Roadmap (Todo)
 * Only really supports one consumer rn. it's a POC.  
 * Add transactions for consumers to ensure atomic processing and offset updates.
-*   Implement a dead-letter queue for failed events.
-*   Enhance consumer exception handling and retry logic.
-*   Integrate metrics and structured logging.
-*   Evaluate dedicated queue backends (e.g., `pgmq` or `pgqueuer`).
+* Implement a dead-letter queue for failed events.
+* Enhance consumer exception handling and retry logic.
+* Integrate metrics and structured logging.
+* Evaluate dedicated queue backends (e.g., `pgmq` or `pgqueuer`).
