@@ -705,3 +705,51 @@ def show(var_name: str) -> Markup:
         {{ show("mood") }}  →  <span x-text="mood"></span>
     """
     return Markup(f'<span x-text="{_js_str(var_name)}"></span>')
+
+
+def include_questionnaire(page_id: int) -> Markup:
+    """
+    Inline-render all pages of another Questionnaire Page into the current page.
+
+    Looks up the page by primary key and renders each of its pages'
+    content through the main Jinja2 environment in page order.  The current
+    error context (``_errors_ctx``) is inherited, so validation errors on
+    included fields are displayed correctly.
+
+    Example::
+
+        {{ include_questionnaire(3) }}
+    """
+    # Lazy imports to avoid the circular dependency between questionnaire_tags
+    # (imported by jinja_env) and jinja_env itself.
+    from Questionnaire.jinja_env import environment as _env
+    from Questionnaire.models import Page
+
+    try:
+        q = Page.objects.get(pk=page_id)
+    except Exception:
+        return Markup(f"<!-- questionnaire page {page_id} not found -->")
+
+    return Markup("".join(
+        _env.from_string(q.content).render()
+    ))
+
+
+def _collecting_include_questionnaire(page_id: int) -> Markup:
+    """
+    Collecting stub for ``include_questionnaire``.
+
+    Traverses the included questionnaire's pages through the
+    required-fields environment so their validators are gathered
+    alongside the host page's own fields.
+    """
+    from Questionnaire.jinja_env import required_fields_env as _req_env
+    from Questionnaire.models import Page
+
+    try:
+        q = Page.objects.get(pk=page_id)
+    except Exception:
+        return Markup("")
+
+    _req_env.from_string(q.content).render()
+    return Markup("")

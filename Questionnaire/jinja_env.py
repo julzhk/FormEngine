@@ -9,10 +9,12 @@ from Questionnaire.templatetags.questionnaire_tags import (
     _CollectQuestionExtension,
     _PassthroughContextExtension,
     _PassthroughWhenExtension,
+    _collecting_include_questionnaire,
     _collecting_text,
     _errors_ctx,
     _req_collector,
     answer,
+    include_questionnaire,
     multianswer,
     show,
     text,
@@ -29,6 +31,7 @@ def get_environment() -> jinja2.Environment:
     env.globals["multianswer"] = multianswer
     env.globals["show"] = show
     env.globals["text"] = text
+    env.globals["include_questionnaire"] = include_questionnaire
     return env
 
 
@@ -50,6 +53,7 @@ def get_required_fields_environment() -> jinja2.Environment:
     env.globals["multianswer"] = lambda *a, **kw: ""
     env.globals["show"] = lambda *a, **kw: ""
     env.globals["text"] = _collecting_text
+    env.globals["include_questionnaire"] = _collecting_include_questionnaire
     return env
 
 

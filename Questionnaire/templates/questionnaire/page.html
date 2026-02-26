@@ -1,23 +1,11 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>{{ page.title }} — {{ questionnaire.name }}</title>
-    <!-- Alpine Plugins -->
-    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js"></script>
+{% extends "questionnaire/base.html" %}
 
-    <script defer src="https://unpkg.com/@alpinejs/ui@3.15.8/dist/cdn.min.js"></script>
-    <script defer src="https://unpkg.com/@alpinejs/focus@3.15.8/dist/cdn.min.js"></script>
-    <script defer src="https://unpkg.com/alpinejs@3.15.8/dist/cdn.min.js"></script>
-    <!-- Include the Play CDN script -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        [x-cloak] { display: none !important; }
-    </style>
-</head>
+{% block title %}{{ page.title }} — {{ questionnaire.name }}{% endblock %}
+
+{% block script %}
 <script>
     document.addEventListener('alpine:init', () => {
-        const formDataKey = 'formData' + {{ questionnaire.id }};
+        const formDataKey = 'formData' + '{{ questionnaire.id }}';
         const storageKey = 'q_{{ questionnaire.id }}_formData';
 
         Alpine.store(formDataKey, JSON.parse(localStorage.getItem(storageKey) || '{}'));
@@ -36,11 +24,14 @@
         }));
     });
 </script>
-<body x-data="questionnairePage">
-<h1>{{ questionnaire.name }}</h1>
-<h2>{{ page.title }}</h2>
-daa {{data }}
-<form method="post" @submit="save">
+{% endblock %}
+
+{% block body_attrs %}x-data="questionnairePage"{% endblock %}
+
+{% block body %}
+<h1 class="text-3xl font-bold mb-4">{{ questionnaire.name }}</h1>
+<h2 class="text-xl font-semibold mb-6 text-gray-700">{{ page.title }}</h2>
+<form method="post" @submit="save" class="space-y-6">
 
     {% csrf_token %}
 
@@ -56,7 +47,10 @@ daa {{data }}
     {% endif %}
 
     {{ rendered_content|safe }}
-    <button type="submit">Next</button>
+    <div class="pt-4">
+        <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition-colors font-semibold">
+            Next
+        </button>
+    </div>
 </form>
-</body>
-</html>
+{% endblock %}
