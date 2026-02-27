@@ -753,3 +753,5 @@ def _collecting_include_questionnaire(page_id: int) -> Markup:
 
     _req_env.from_string(q.content).render()
     return Markup("")
+
+

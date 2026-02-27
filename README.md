@@ -1,109 +1,213 @@
-# FormEngine Spike Experiment
+# FormEngine
 
-How to capture a typed form submission as an immutable event but also allow evolution of the form definition over time? How to support event driven audit log in a Django application?
+A spike experiment for a dynamic form engine using **event sourcing**. Explores how to capture typed form submissions as immutable events while allowing form definitions to evolve over time, and how to support an event-driven audit log and downstream integrations in a Django application.
+
+
+## Introduction
+
+* Can data collection forms be configurable?: 
+* Can they be easier to maintain and extend?
+* This could be a data models or a DSL, or YAML... but I felt they're all a bit limiting. So why not use a form of HTML? Fortunately Django has a super templating/ component system which means we can define a form like this:
+ 
+```html
+{% question "mood", "How are you feeling today?",  ["required"] %}
+   {{ answer("happy", "Happy") }}
+   {{ answer("sad",   "Sad") }}
+{% endquestion %}
+{% when "mood", "sad" %}
+        {{ text("why", "Why?", placeholder="Anything else?") }}
+{% endwhen %}
+```
+
+* This shows the first question and if the answer is 'sad' it shows the user the second question. 
+* Of course, this can support all kinds of fields and validators and error messages so on. 
+* These 'template tags' (eg the stuff in a ```{% %}``` are a python function + a fragment of HTML so they can do anything.eg: they can do database or API calls;
+* These html fragments could initiate an island of react interactivity. 
+* So we can build a well tested library of these form components and compose them for each client/form. 
+* When the form is complete then the spike uses the same idea to format and transform the json for sending to Docusign:
+```{
+  "mood_in_docusign": "{{ mood }}",
+  "tin": "{{ tin | format_tin }}",
+  "need_vacation": "{% if mood != 'happy' %} Take a break{% endif %}"
+}
+```
+
+* Now this takes that raw form data and maps our form variable to the label in the docusign 
+* The 'tin' has a filter: so we can do a transformation on the data. (add dashes say, or a default or whatever)
+* The jinja template system supports logic which is handy
+
+### Obstacles:
+
+* Change is hard. 
+* Obvs this moves the complexity from one place to another: it'll still be a job to make all the forms 
+* However it's more transparent - and we're composing the forms, which makes them more testable and editable 
+* client specific behaviours: more of a component in the flow rather than a big ball of mud 
+* Can try a real form to see if it works in real life. 
+* Give a demo & get some buy in from stakeholders 
+* Examine if it'll work on the most difficult scenarios: Don't want surprises.
+ 
 
 ---
 
-This project is a spike experiment for a dynamic form engine using event sourcing. It allows for dynamic questionnaire creation, JSON-based event capture, and asynchronous event processing.
-
-## Architecture (C4 Model Style)
-
-### Level 1: System Context
-The FormEngine system allows Users to fill out dynamic questionnaires. Submissions are captured as events, which are then processed by various Processors for downstream tasks (e.g., logging, integration with third-party services like DocuSign).
+## C4 — Level 1: System Context
 
 ```mermaid
 graph TD
-    User((User)) -->|Fills out Questionnaire| FormEngine[FormEngine System]
-    FormEngine -->|Writes Data to| Output[(Output Files/Logs)]
-    Admin((Admin)) -->|Defines Questionnaires| FormEngine
+    Admin((Admin))
+    User((User))
+    FS[FormEngine System]
+    DS[(DocuSign / Output Files)]
+
+    Admin -->|Defines questionnaires & mappings| FS
+    Admin -->|Triggers event processing| FS
+    User -->|Fills out multi-page questionnaire| FS
+    FS -->|Writes transformed payload| DS
 ```
-
-### Level 2: Containers
-The system is built as a Django 'modulith' containing several primary Django Apps:
-
-```mermaid
-graph LR
-    subgraph FormEngine Monolith
-        Q[Questionnaire]
-        EM[EventManager]
-        DI[DocuSignIntegration]
-    end
-
-    User --> Q
-    Q -->|Creates Events| EM
-    EM -->|Processed by| DI
-```
-
-1.  **Questionnaire**: The user-facing application for defining and rendering multi-page forms.
-2.  **EventManager**: The event store that records all submissions as immutable events.
-3.  **DocuSignIntegration**: A processor that maps event data to DocuSign payloads.
 
 ---
 
-## Django Apps & Data Models
+## C4 — Level 2: Containers
+
+The system is a Django **modulith** — a single process composed of focused Django apps.
+
+```mermaid
+graph LR
+    subgraph FormEngine ["FormEngine (Django Monolith)"]
+        Q[Questionnaire\nJinja2 form engine]
+        EM[EventManager\nImmutable event store]
+        DS[DocuSignIntegration\nEvent processor]
+    end
+
+    User((User)) -->|HTTP| Q
+    Admin((Admin)) -->|Django Admin| Q
+    Admin -->|Process Events button| EM
+    Q -->|Creates Event on submit| EM
+    EM -->|Events consumed by| DS
+    DS -->|Renders payload to file| Output[(Output File)]
+```
+
+| App | Responsibility |
+|---|---|
+| **Questionnaire** | Multi-page Jinja2 form rendering, validation, submission |
+| **EventManager** | Immutable event log; offset tracking per processor |
+| **DocuSignIntegration** | Transforms event data via Jinja2 mappings; writes DocuSign payload |
+
+
+---
+
+## C4 — Level 3: Components
+
+### Questionnaire
+
+```mermaid
+graph TD
+    subgraph Questionnaire
+        V[views.py\nquestionnaire_page\nquestionnaire_complete\nquestionnaire_submit]
+        J[jinja_env.py\n3 Jinja2 environments]
+        T[questionnaire_tags.py\nExtensions + globals]
+        M[models.py]
+    end
+
+    V -->|renders via| J
+    J -->|uses| T
+    V -->|reads / writes| M
+```
+
+**Models**
 
 ```mermaid
 classDiagram
     class Questionnaire {
-        +String name
-        +String description
-        +String completed_content
+        +CharField name
+        +TextField description
+        +TextField completed_content
+        +DateTimeField created_at
+        +DateTimeField updated_at
     }
     class Page {
-        +String title
-        +Integer order
-        +String content
+        +CharField title
+        +PositiveIntegerField order
+        +TextField content
     }
     class QuestionnaireSubmission {
-        +JSON responses
-        +DateTime submitted_at
-    }
-    class Event {
-        +JSON data
-        +JSON metadata
-        +DateTime created_at
-    }
-    class ConsumerOffset {
-        +String processor_class
-        +DateTime updated_at
-    }
-    class DocuSignFieldMapping {
-        +String name
-        +JSON template_string
-        +render(data_dict)
+        +JSONField responses
+        +DateTimeField submitted_at
     }
 
-    Questionnaire "1" *-- "*" Page : contains
-    Questionnaire "1" -- "*" QuestionnaireSubmission : has
-    ConsumerOffset o-- Event : tracks
-    Questionnaire "1" -- "0..1" DocuSignFieldMapping : mapped by
+    Questionnaire "1" *-- "many" Page : contains
+    Questionnaire "1" *-- "many" QuestionnaireSubmission : records
 ```
 
-### 1. Questionnaire
-Responsible for the structure of questionnaires and rendering them using Jinja2 templates.
+**Jinja2 Environments**
 
-*   **Models**:
-    *   `Questionnaire`: The top-level entity.
-    *   `Page`: Individual pages of a questionnaire, containing Jinja2 template content.
-    *   `QuestionnaireSubmission`: Records the raw JSON response of a submission.
-*   **Key Logic**:
-    *   Multi-page navigation and validation.
-    *   Custom validators (e.g., `required`, `is_number`) defined in `views.py`.
+Jinja is used in three contexts:
+* Rendering the questionnaire page
+* Transforming the supplied submission data into a JSON payload
+* Rendering the completion page
 
-### 2. EventManager
-The backbone of the event-driven architecture.
+| Environment | Purpose |
+|---|---|
+| `environment` | Full rendering with custom extensions — used for page HTML output |
+| `required_fields_env` | Collecting pass — extracts `{field: [validators]}` without emitting HTML |
+| `completed_content_environment` | Simple environment for the post-submission completion page |
 
-*   **Models**:
-    *   `Event`: An immutable record of a submission. Stores data and metadata as `JSONField`.
-    *   `ConsumerOffset`: Tracks the last processed `Event` for each specific `Processor` class.
+**Template Tags & Globals** (available inside `Page.content`: in the questionnaire page)
 
-### 3. DocuSignIntegration
-Provides integration with DocuSign by mapping form data to DocuSign payloads.
+| Tag / Global | Description |
+|---|---|
+| `{% question "name", "label" %}` | Renders a radio-button group |
+| `{% multiquestion "name", "label" %}` | Renders a checkbox group |
+| `{% context "f1", "f2" %}` | Shared Alpine.js scope; enables cross-field `x-show` |
+| `{% when "field" == "value" %}` | Conditionally shows a block |
+| `{{ answer("val", "Label") }}` | Option inside `{% question %}` |
+| `{{ multianswer("val", "Label") }}` | Option inside `{% multiquestion %}` |
+| `{{ text("name", validators=["required","is_number"]) }}` | Free-text input with validators |
+| `{{ show("field_name") }}` | Emits current stored value |
+| `{{ include_questionnaire(page_id) }}` | Inline-renders another `Page` by PK |
+| `{{ complex_function("a","b","c") }}` | Joins args with `-`, repeats 6× |
 
-*   **Models**:
-    *   `DocuSignFieldMapping`: Defines how submission data should be transformed into a DocuSign JSON payload using Jinja2 templates.
-*   **Key Logic**:
-    *   **DocuSignProcessor**: A specialized processor that renders the mapping's template using the event data and writes the result to a file (simulating an API call).
+---
+
+### EventManager
+
+```mermaid
+classDiagram
+    class Event {
+        +JSONField data
+        +JSONField metadata
+        +DateTimeField created_at
+        +save() raises TypeError on update
+    }
+    class ConsumerOffset {
+        +CharField processor_class
+        +FK offset
+        +DateTimeField updated_at
+    }
+
+    ConsumerOffset --> Event : tracks last processed
+```
+
+- `Event` is **immutable** — `save()` raises `TypeError` if the record already exists.
+- `metadata` carries context: `source`, `questionnaire_id`, `questionnaire_name`, `submission_id`.
+- The Django Admin includes a **▶ Process Events** button on both the `Event` and `ConsumerOffset` changelists, which calls `DocuSignProcessor.consume()` directly.
+
+---
+
+### DocuSignIntegration
+There could be multiple processors, each with their own `ConsumerOffset` but in this spike sharing the `Event` model. Not implemented: Just one consumer 
+```mermaid
+graph TD
+    subgraph DocuSignIntegration
+        P[DocuSignProcessor]
+        M[DocuSignFieldMapping model]
+        J[jinja_env.py eg: \nformat_tin\nclient_specific_fn]
+    end
+
+    P -->|looks up by questionnaire_id| M
+    M -->|renders template_string via| J
+    P -->|writes output| File[(placeholder: \n timestamped .json file)]
+```
+
 
 ---
 
@@ -115,48 +219,95 @@ sequenceDiagram
     participant User
     participant Q as Questionnaire
     participant EM as EventManager
-    participant Proc as Processor (Management Command)
+    participant DS as DocuSignProcessor
 
-    Note over Admin, Q: 1. Questionnaire Definition
-    Admin->>Q: Create/Update Questionnaire & Pages
-    
-    Note over User, EM: 2. Submission
-    User->>Q: Submit Page Data
-    Q->>Q: Validate Data
-    Note over Q, EM: On Last Page Submit
-    Q->>EM: Create Event (JSON Data + Metadata)
-    
-    Note over Proc, EM: 3. Processing
-    Proc->>EM: Fetch New Events
-    loop For Each Event
-        Proc->>Proc: Execute do_process()
-        Proc->>EM: Update ConsumerOffset
+    Note over Admin,Q: Setup
+    Admin->>Q: Create Questionnaire + Pages (Admin UI)
+    Admin->>DS: Create DocuSignFieldMapping (Admin UI)
+
+    Note over User,EM: Submission
+    User->>Q: GET /q/{id}/page/{n}/
+    Q-->>User: Rendered Jinja2 page (Alpine.js)
+    User->>Q: POST page data
+    Q->>Q: Validate fields (required, is_number, …)
+    alt validation fails
+        Q-->>User: Re-render page with errors
+    else last page passes
+        Q->>Q: Create QuestionnaireSubmission
+        Q->>EM: Create Event {data, metadata}
+        Q-->>User: Redirect → /q/{id}/complete/
     end
-```
 
-1.  **Questionnaire Definition**: An admin creates a `Questionnaire` and its `Page`s in the Django Admin.
-2.  **Submission**: A user fills out the questionnaire. On the final page submission:
-    *   Data is validated.
-    *   A `QuestionnaireSubmission` is created.
-    *   An `Event` is created in the `EventManager` with the submission data.
-3.  **Processing**: The `process_events` management command is executed:
-    *   It identifies all active `Processor` subclasses.
-    *   Each processor checks its `ConsumerOffset` for new events.
-    *   For each new event, `do_process()` is called (e.g., `DocuSignProcessor` generates a JSON payload).
-    *   The `ConsumerOffset` is updated.
+    Note over Admin,DS: Processing
+    Admin->>EM: Click "▶ Process Events"
+    EM->>DS: DocuSignProcessor.consume()
+    loop for each unprocessed Event
+        DS->>DS: Look up DocuSignFieldMapping
+        DS->>DS: Render Jinja2 template with event.data
+        DS->>DS: Write payload to file
+        DS->>EM: Advance ConsumerOffset
+    end
+    EM-->>Admin: Success message
+```
 
 ---
 
-## Technical Stack
-*   **Language**: Python 3.13
-*   **Framework**: Django
-*   **Frontend**: HTMX (for multi-page form navigation), Jinja2 (for dynamic content)
-*   **Database**: SQLite (default for spike)
+## Tech Stack
 
-## Future Roadmap (Todo)
-* Only really supports one consumer rn. it's a POC.  
-* Add transactions for consumers to ensure atomic processing and offset updates.
-* Implement a dead-letter queue for failed events.
-* Enhance consumer exception handling and retry logic.
-* Integrate metrics and structured logging.
-* Evaluate dedicated queue backends (e.g., `pgmq` or `pgqueuer`).
+| Layer | Technology                                        |
+|---|---------------------------------------------------|
+| Language | Python 3.13                                       |
+| Framework | Django 6                                          |
+| Package manager | `uv`                                              |
+| Database | SQLite (spike default)                            |
+| Templates | Jinja2 (eg template tags + Alpine.js integration) |
+| Frontend | Alpine.js + HTMX + Tailwind CSS                   |
+| Admin extras | `django-guardian`, `django-json-widget`           |
+
+---
+
+## Running Locally
+
+```bash
+uv run manage.py migrate
+uv run manage.py runserver 8002
+```
+
+Process events from the command line:
+
+```bash
+uv run manage.py process_events
+```
+
+Or use the **▶ Process Events** button in the Django Admin on the Event / ConsumerOffset changelist pages.
+
+---
+
+## Implementation Notes
+
+- forms: retain previous incomplete submissions,
+- pages animations
+- form-level validation & messages  (admin managed)
+- field-level validation & messages (admin managed)
+- each form flow is configured explicitly
+- No FE/BE API mismatch
+- No logic in the FE: All business logic is composable.
+- Completion page can trigger actions (eg: logging / follow-up email etc)
+- forms (and partial forms) can be included into multiple questionnaires
+- contingent form fields: shown only given fields if other fields are filled in
+- later questions contents can be based on previous answers
+- Supports 'islands of react' if required for complex field type.
+- supports complex/client specific data transformations.
+- maintainable & extensible
+- audit trail and easier to reason about
+- Simple HTML: mobile-friendly, printable, accessible, etc.
+- Should support multilingual forms (tbc)
+- can be gradually deployed
+
+## Known Limitations
+
+Event processing is a spike. Hence:
+- Only `DocuSignProcessor` is wired up
+- No transactions around consume + offset update (non-atomic).
+- No dead-letter queue or retry logic for failed events.
+- SQLite is unsuitable for concurrent consumers; swap for PostgreSQL + `pgmq`/`pgqueuer` for production.
